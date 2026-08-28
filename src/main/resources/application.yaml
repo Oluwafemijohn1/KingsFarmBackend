@@ -23,3 +23,37 @@ spring:
       hibernate:
         format_sql: true
     open-in-view: false
+
+# Only expose a bare-minimum health check on the actuator — everything else
+# (env, beans, mappings, etc.) stays off, and even /health still sits behind
+# the API key filter like every other endpoint.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+# App-specific security config. All three of these are read from environment
+# variables in real use (see BACKEND_PLAN.md §3/§11) — the fallback values
+# below only exist so the app runs out of the box on a first local checkout.
+# Before this ever leaves your machine, set real values for API_SHARED_KEY
+# and JWT_SECRET as environment variables instead of relying on defaults.
+app:
+  security:
+    # Shared secret every request must send as the X-API-Key header, checked
+    # before Spring Security even runs — keeps random clients off the API.
+    api-key: ${API_SHARED_KEY:local-dev-api-key-change-me}
+    jwt:
+      # HS256 needs a secret of at least 256 bits (32 chars) — this default is
+      # long enough to work, but is not a secret and must never be used
+      # outside local development.
+      secret: ${JWT_SECRET:local-dev-only-jwt-signing-secret-replace-me-before-deploying-anywhere-real}
+      access-token-minutes: ${JWT_ACCESS_MINUTES:30}
+      refresh-token-days: ${JWT_REFRESH_DAYS:7}
+  # Seeds exactly one Administrator account on first startup (see
+  # DataSeeder) so there's a way to log in at all before any other user
+  # exists — every account after this one is created by that Administrator
+  # from inside the app, never by signing up.
+  bootstrap:
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    admin-full-name: ${BOOTSTRAP_ADMIN_NAME:System Administrator}
