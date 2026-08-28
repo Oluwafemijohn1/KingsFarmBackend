@@ -1,3 +1,25 @@
 spring:
   application:
     name: KingsFarmBackend
+
+  # Local MySQL connection — matches the `kingsfarm_db` database created via
+  # Homebrew's mysql service (see the setup walkthrough). Change these three
+  # values if your local username/password/db name differ.
+  datasource:
+    url: jdbc:mysql://localhost:3306/kingsfarm_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC
+    username: root
+    password: "Emmanuel@123"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      # "update" auto-creates/updates tables from your @Entity classes on
+      # startup — convenient while building locally. Switch to "validate"
+      # (and manage schema changes via migrations) once this is closer to
+      # production.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
