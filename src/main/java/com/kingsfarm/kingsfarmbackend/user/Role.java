@@ -24,4 +24,10 @@ public enum Role {
     public String label() {
         return label;
     }
+
+    /** Human-readable label rather than the Java constant name — reads better in audit-log detail strings built via SpEL string concatenation. */
+    @Override
+    public String toString() {
+        return label;
+    }
 }

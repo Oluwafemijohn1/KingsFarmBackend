@@ -1,7 +1,10 @@
 package com.kingsfarm.kingsfarmbackend.user;
 
+import com.kingsfarm.kingsfarmbackend.audit.Audited;
+import com.kingsfarm.kingsfarmbackend.common.Mod;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
 import com.kingsfarm.kingsfarmbackend.user.dto.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -25,6 +28,8 @@ public class UserAdminService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    @Audited(module = Mod.ADMIN, action = "Create User", type = LogType.AUDIT,
+            detail = "'New user: ' + #request.username() + ' (' + #request.role() + ')'")
     @Transactional
     public CreateUserResponse createUser(CreateUserRequest request, String createdByUsername) {
         if (userRepository.existsByUsername(request.username())) {
@@ -49,6 +54,8 @@ public class UserAdminService {
         return userRepository.findAllByOrderByCreatedAtDesc(pageable).map(UserSummaryResponse::from);
     }
 
+    @Audited(module = Mod.ADMIN, action = "Update User", type = LogType.AUDIT,
+            detail = "'Updated user #' + #id + ' -> ' + #request.fullName() + ' (' + #request.role() + ')'")
     @Transactional
     public UserSummaryResponse updateUser(Long id, UpdateUserRequest request) {
         User user = findOrThrow(id);
@@ -57,6 +64,8 @@ public class UserAdminService {
         return UserSummaryResponse.from(userRepository.save(user));
     }
 
+    @Audited(module = Mod.ADMIN, action = "Set User Active", type = LogType.AUDIT,
+            detail = "'User #' + #id + ' -> ' + (#active ? 'Activated' : 'Deactivated')")
     @Transactional
     public UserSummaryResponse setActive(Long id, boolean active) {
         User user = findOrThrow(id);
@@ -64,6 +73,8 @@ public class UserAdminService {
         return UserSummaryResponse.from(userRepository.save(user));
     }
 
+    @Audited(module = Mod.ADMIN, action = "Reset Password", type = LogType.AUDIT,
+            detail = "'Password reset for user #' + #id")
     @Transactional
     public ResetPasswordResponse resetPassword(Long id) {
         User user = findOrThrow(id);

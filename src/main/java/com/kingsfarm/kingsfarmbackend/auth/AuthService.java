@@ -11,6 +11,7 @@ import com.kingsfarm.kingsfarmbackend.user.User;
 import com.kingsfarm.kingsfarmbackend.user.UserRepository;
 import com.kingsfarm.kingsfarmbackend.security.AppSecurityProperties;
 import com.kingsfarm.kingsfarmbackend.security.JwtService;
+import com.kingsfarm.kingsfarmbackend.systemlog.SystemLogService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,32 +42,40 @@ public class AuthService {
     private final JwtService jwtService;
     private final SecuritySettingsService securitySettingsService;
     private final AppSecurityProperties securityProperties;
+    private final SystemLogService systemLogService;
 
     public AuthService(UserRepository userRepository,
                         RefreshTokenRepository refreshTokenRepository,
                         PasswordEncoder passwordEncoder,
                         JwtService jwtService,
                         SecuritySettingsService securitySettingsService,
-                        AppSecurityProperties securityProperties) {
+                        AppSecurityProperties securityProperties,
+                        SystemLogService systemLogService) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.securitySettingsService = securitySettingsService;
         this.securityProperties = securityProperties;
+        this.systemLogService = systemLogService;
     }
 
     @Transactional
-    public LoginResponse login(LoginRequest request) {
-        User user = userRepository.findByUsername(request.username())
-                .orElseThrow(() -> new InvalidCredentialsException("Incorrect username or password."));
+    public LoginResponse login(LoginRequest request, String ipAddress) {
+        User user = userRepository.findByUsername(request.username()).orElse(null);
+        if (user == null) {
+            systemLogService.logAccess(null, request.username(), "Login", "Failed", ipAddress);
+            throw new InvalidCredentialsException("Incorrect username or password.");
+        }
 
         if (!user.isActive()) {
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Failed", ipAddress);
             throw new InvalidCredentialsException("Incorrect username or password.");
         }
 
         if (user.getLockedUntil() != null) {
             if (user.getLockedUntil().isAfter(Instant.now())) {
+                systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Locked", ipAddress);
                 throw new AccountLockedException("This account is temporarily locked due to too many failed login attempts. Try again later.");
             }
             // Lockout window has passed — clear it so this attempt gets a fresh count.
@@ -76,12 +85,14 @@ public class AuthService {
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             registerFailedAttempt(user);
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Failed", ipAddress);
             throw new InvalidCredentialsException("Incorrect username or password.");
         }
 
         user.setFailedLoginAttempts(0);
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
+        systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Success", ipAddress);
 
         String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword());
         String refreshToken = issueRefreshToken(user);
@@ -131,11 +142,13 @@ public class AuthService {
     }
 
     @Transactional
-    public void logout(LogoutRequest request) {
+    public void logout(LogoutRequest request, String ipAddress) {
         String hash = jwtService.hashRefreshToken(request.refreshToken());
         refreshTokenRepository.findByTokenHash(hash).ifPresent(token -> {
             token.setRevokedAt(Instant.now());
             refreshTokenRepository.save(token);
+            User user = token.getUser();
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Logout", "Success", ipAddress);
         });
     }
 

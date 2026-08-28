@@ -2,6 +2,7 @@ package com.kingsfarm.kingsfarmbackend.auth;
 
 import com.kingsfarm.kingsfarmbackend.auth.dto.*;
 import com.kingsfarm.kingsfarmbackend.security.AuthenticatedPrincipal;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -17,8 +18,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return authService.login(request, httpRequest.getRemoteAddr());
     }
 
     @PostMapping("/refresh")
@@ -27,8 +28,8 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public void logout(@Valid @RequestBody LogoutRequest request) {
-        authService.logout(request);
+    public void logout(@Valid @RequestBody LogoutRequest request, HttpServletRequest httpRequest) {
+        authService.logout(request, httpRequest.getRemoteAddr());
     }
 
     @PostMapping("/change-password")

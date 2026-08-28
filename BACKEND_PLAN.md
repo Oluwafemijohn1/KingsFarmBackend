@@ -7,8 +7,12 @@ rule, and edge case implemented in the frontend during our earlier sessions is c
 here so nothing gets dropped in translation. This file is the source of truth for the
 build — update it as decisions change.
 
-Status: **Phase 0 complete** (Spring Boot connected to local MySQL). Nothing beyond that
-has been built yet — this document is the plan, not a changelog.
+Status: **Phase 0 and Phase 1 complete** (infra + JWT/API-key auth, admin user
+management with auto-generated passwords, security settings, bootstrap admin seed).
+**Phase 2 complete** (generic opening-stock locking + approval workflow, unified
+system_logs table, `@Audited` AOP aspect, login/logout access logging). Phase 3
+(per-module entities/endpoints) is next. This document is the plan, not a changelog —
+update it as decisions change, but treat it as living documentation, not history.
 
 ---
 
@@ -310,13 +314,28 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 ## 10. Phased Roadmap
 
 - **Phase 0 — Infra** ✅ done: Spring Boot ↔ local MySQL connected.
-- **Phase 1 — Auth & Users**: `users`, `refresh_tokens`, `security_settings` entities;
-  API key filter; JWT login/refresh/logout; admin user CRUD with default
-  password + forced change; role-based `@PreAuthorize` scaffolding; global error
-  handling; Swagger UI wired up.
-- **Phase 2 — Shared building blocks**: pagination DTO/utility; generic
-  `opening_stock_state`/`opening_stock_requests` tables + endpoints; audit-logging
-  aspect writing to `system_logs`; Bean Validation conventions.
+- **Phase 1 — Auth & Users** ✅ done: `users`, `refresh_tokens`, `security_settings`
+  entities; `ApiKeyFilter` + `JwtAuthenticationFilter` + `SecurityConfig`; JWT
+  login/refresh/logout/change-password; admin user CRUD with auto-generated password
+  + forced change (`MustChangePasswordInterceptor`); role-based `@PreAuthorize`
+  scaffolding; global error handling. (Swagger UI still deferred — see note below.)
+- **Phase 2 — Shared building blocks** ✅ done: `PageResponse` (from Phase 1); generic
+  `opening_stock_state`/`opening_stock_requests` tables + `OpeningStockController`
+  (managers request, Administrator resolves — approval unlocks the field); unified
+  `system_logs` table + `SystemLogService` + Administrator-only `SystemLogController`;
+  `@Audited` annotation + `AuditLoggingAspect` (AOP, writes ACTIVITY/AUDIT rows on
+  annotated service methods — applied to user-admin actions and opening-stock
+  requests/resolutions so far); login/logout now write real ACCESS rows via
+  `AuthService`. Bean Validation conventions (`@Valid` + Jakarta annotations on every
+  request DTO) already established in Phase 1, reused here.
+  - Note: added a `Mod` → wire-string `Converter` (`ModConverter`) since Spring MVC's
+    default enum binding for `@RequestParam`/`@PathVariable` doesn't know about the
+    `@JsonValue`/`@JsonCreator` mapping used for JSON bodies — worth remembering for
+    any other enum that needs to appear in a query string or path.
+  - `RequestStatus`/`LogType` still serialize as plain uppercase Java enum names
+    (`"PENDING"`, `"ACCESS"`) rather than a frontend-matching wire format — nothing
+    in the frontend consumes these yet, so this is deliberately deferred to Phase 5
+    rather than guessed at now.
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
   first): Bird Stock → Production → Whole Egg (incl. customers + opening balance) →
