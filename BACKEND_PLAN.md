@@ -338,8 +338,33 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     rather than guessed at now.
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
-  first): Bird Stock → Production → Whole Egg (incl. customers + opening balance) →
-  Crack Egg → Mortality → Feed Mill.
+  first): **Bird Stock ✅ done** → **Production ✅ done** → Whole Egg (incl. customers +
+  opening balance) → Crack Egg → Mortality → Feed Mill.
+  - Bird Stock: `Pen` (catalog, soft-deactivate not hard-delete) + `BirdPenRecord`
+    (one row per pen per day, unique on pen+date). Closing is never stored — always
+    computed as `opening - mortality - birdSales + restocking`. A new day's row is
+    found-or-created on read, carrying Opening forward from the prior day's Closing
+    automatically, and locking it via `OpeningStockLockService` the same way the
+    frontend's `OpeningStockCell` expects. Same-day edit lock is enforced by comparing
+    `entryDate` to `LocalDate.now()` — collapses the frontend's separate
+    save/unlock-for-today toggle into one rule, since the backend persists on every
+    field write instead of on an explicit "Save" click; Phase 5 frontend work should
+    adapt the UI to autosave-per-field rather than porting the old toggle literally.
+    Reads open to Administrator + Production Manager; writes are Production Manager
+    only (Administrator is view-only here, same as the frontend's banner).
+  - Production: `ProductionPenEntry` (per pen/day, flat qty columns per category —
+    same reasoning as BirdPenRecord) + `ProductionDayState` (one row per day covering
+    every scalar field: catOpening ×6 categories, crack good/rough open/prod, good/
+    rough classify). Added a shared `CatKey` enum (`common` package, mirrors
+    shared.ts's CAT_KEYS/CAT_LABELS/CRACK_WEIGHTS) plus its own wire-format
+    `Converter` (same reasoning as `ModConverter`). catOpening is opening-stock-locked
+    per category; crackGoodOpen/crackRoughOpen are carried forward daily too but
+    deliberately NOT run through the lock — the frontend wraps catOpening in
+    `OpeningStockCell` but uses a plain `NumInput` for those two, so that's preserved
+    exactly rather than "fixed." Whole Egg → Production and Crack Egg → Production
+    auto-feeds (crack use, sales, gift) are stubbed at zero in `ProductionService`
+    with clear TODOs — replace once those modules exist, in the order the roadmap
+    already specifies.
 - **Phase 4 — Reports**: real aggregation endpoints per module + general report;
   Relief Access endpoints; Admin logs backed by real `system_logs` rows.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
