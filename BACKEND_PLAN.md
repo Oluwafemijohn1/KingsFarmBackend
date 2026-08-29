@@ -11,8 +11,8 @@ Status: **Phase 0 and Phase 1 complete** (infra + JWT/API-key auth, admin user
 management with auto-generated passwords, security settings, bootstrap admin seed).
 **Phase 2 complete** (generic opening-stock locking + approval workflow, unified
 system_logs table, `@Audited` AOP aspect, login/logout access logging). **Phase 3 in
-progress**: Bird Stock, Production, Whole Egg, and Crack Egg are done; Mortality and
-Feed Mill remain. This document is the plan, not a changelog — update it as decisions
+progress**: Bird Stock, Production, Whole Egg, Crack Egg, and Mortality are done; only
+Feed Mill remains. This document is the plan, not a changelog — update it as decisions
 change, but treat it as living documentation, not history.
 
 ---
@@ -178,16 +178,21 @@ and reported on properly.
   price, rough-crack feed-mill usage — mirrors `gcOpening`, `gcSellingPrice`,
   `gcGiftQty`, `rcOpening`, `rcFeedMill` etc.
 
-### 5.5 Mortality
-- `mort_pen_entries`: id, entry_date, pen, category (enum Good/Dry/Runt/Green/PM-
-  Reject), mortality_count, entered_by, updated_by — same-day-lock pattern
-- `mort_sale_entries`: id, txn_date, txn_time, category, qty, price, payment_methods,
-  bank, cash_amount, transfer_amount, amount_paid, credit, advance, entered_by,
+### 5.5 Mortality — as built (see Phase 3 roadmap entry below for the full reasoning)
+- `mort_category_values`: id, category (unique), opening (opening-stock-locked),
+  gift_qty (overwritten, not accumulated) — the only two truly-live scalars;
+  everything else on Stock Overview is computed at read time
+- `mort_pen_entries`: id, pen_id (FK), entry_date, good, dry, runt, green,
+  pm_reject, entered_by, updated_by — unique on (pen_id, entry_date), same-day-lock
+  pattern, no carry-forward
+- `mort_sale_entries` (+ `mort_sale_entry_payment_methods`): id, category, qty,
+  price, customer, state, payment methods, bank, cash_amount, transfer_amount,
+  amount_paid, credit, advance (hand-typed, not derived), occurred_at, entered_by,
   updated_by
-- `mort_gift_log`: id, txn_date, txn_time, good, dry, runt, recipient, authorizer,
+- `mort_gift_log`: id, good, dry, runt, recipient, authorizer, occurred_at,
   entered_by, updated_by
-- `mort_catfish_disposal`: id, entry_date, category (Green/PM-Reject), catfish_qty,
-  disposal_qty, entered_by, updated_by
+- `mort_catfish_disposal_state`: id, entry_date (unique), catfish_qty, disposal_qty,
+  entered_by, updated_by — one combined row per day, not split by category
 
 ### 5.6 Feed Mill
 - `feed_ingredients`: id, name, unit, min_threshold
@@ -340,7 +345,7 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
   first): **Bird Stock ✅ done** → **Production ✅ done** → **Whole Egg ✅ done** →
-  **Crack Egg ✅ done** → Mortality → Feed Mill.
+  **Crack Egg ✅ done** → **Mortality ✅ done** → Feed Mill.
   - Bird Stock: `Pen` (catalog, soft-deactivate not hard-delete) + `BirdPenRecord`
     (one row per pen per day, unique on pen+date). Closing is never stored — always
     computed as `opening - mortality - birdSales + restocking`. A new day's row is
@@ -419,6 +424,39 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     Production's `getTodayDayState()` for `crackGoodProd`/`goodClassify`/
     `crackRoughProd`/`roughClassify` non-lazily. Customer stays free text per §11
     decision #3 — no directory, no running balance.
+  - Mortality: **self-contained, no cross-module feed in or out** — the only Phase 3
+    module like that. New `MortCat` enum (Good/Dry/Runt/Green/PM-Reject — unrelated
+    to `CatKey`'s egg sizes; don't confuse the two) plus its own wire-format
+    `Converter`. Reuses the same `Pen` catalog as Bird Stock/Production (confirmed
+    against the frontend — all three screens list the same five pens), so
+    `MortPenEntry` mirrors `ProductionPenEntry` exactly: one row per (pen, day), flat
+    columns per category, no carry-forward, same-day edit lock via
+    `entryDate == today`. Deliberately independent of `BirdPenRecord.mortality` even
+    though both are called "mortality" — confirmed by reading both frontend screens,
+    the numbers never match or sync — same reasoning as the crackGoodOpen/gcOpening
+    precedent. `MortCategoryValue` holds only the two truly-live scalars per
+    category (opening, opening-stock-locked; and gift qty, overwritten not
+    accumulated) — everything else on the Stock Overview table is computed live
+    rather than stored, to avoid any drift risk: Produced sums today's
+    `MortPenEntry` rows (mirrors `ProductionService.catProdTotals`), Sales sums all
+    `MortSaleEntry` rows ever for that category (mirrors
+    `CrackEggService.goodSalesQty`). Catfish Feed Transfer (Green only) and Disposal
+    (PM/Reject only) share one same-day-locked record, `MortCatfishDisposalState`
+    (one row per day, no carry-forward) — modeled as a single combined row rather
+    than the two-separate-rows sketch originally in this section, because the
+    frontend's `saveCatfishDisposal()` is one atomic save covering both figures
+    under one `SaveLockBar`. `MortSaleEntry`'s credit/advance are hand-typed by
+    staff and persisted as-is, same as Crack Egg's `GcSaleTransaction` and unlike
+    Whole Egg. Gift is a single atomic "Save Gifts" action
+    (`MortalityService.saveGift`) that both overwrites the three saleable
+    categories' live gift totals AND appends a permanent `MortGiftLogEntry` snapshot
+    in one call — simpler than Crack Egg's gift flow, because the frontend's gift
+    fields here have no independent per-keystroke live-save; they're pure form state
+    until the Save button fires. Introduced a `peekTodayCatfishDisposal()`
+    read-only helper distinct from the persisting `todayCatfishDisposal()`, since
+    calling the latter via self-invocation from the read-only `stockOverview()` path
+    would run its insert-if-missing inside a read-only transaction — worth reusing
+    this pattern if a similar read/write split comes up in Feed Mill.
 - **Phase 4 — Reports**: real aggregation endpoints per module + general report;
   Relief Access endpoints; Admin logs backed by real `system_logs` rows.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
