@@ -15,6 +15,7 @@ import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCatOpeningRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCrackFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdatePenEntryRequest;
+import com.kingsfarm.kingsfarmbackend.crackegg.CrackEggService;
 import com.kingsfarm.kingsfarmbackend.wholeegg.WholeEggService;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
@@ -43,9 +44,11 @@ import java.util.Locale;
  * {@code @Lazy} here to break the constructor-injection cycle; whichever
  * side gets constructed first no longer needs the other to already exist.
  *
- * TODO(Crack Egg module): crackEggGoodGift/crackEggGoodSales are stubbed at
- * zero — replace with Crack Egg's gift qty and good-crack sale transaction
- * sum once that module exists (§6: Crack Egg → Production).
+ * crackEggGoodGift/crackEggGoodSales read live from CrackEggService (§6:
+ * Crack Egg → Production) — also genuinely bidirectional (CrackEggService
+ * reads this class's today's ProductionDayState for its own Good/Rough
+ * Crack Production & Received figures), so crackEggService is injected
+ * {@code @Lazy} here too, same reasoning as wholeEggService.
  */
 @Service
 public class ProductionService {
@@ -56,19 +59,22 @@ public class ProductionService {
     private final ProductionDayStateRepository dayStateRepository;
     private final OpeningStockLockService lockService;
     private final WholeEggService wholeEggService;
+    private final CrackEggService crackEggService;
 
     public ProductionService(PenRepository penRepository,
                               BirdPenRecordRepository birdPenRecordRepository,
                               ProductionPenEntryRepository penEntryRepository,
                               ProductionDayStateRepository dayStateRepository,
                               OpeningStockLockService lockService,
-                              @Lazy WholeEggService wholeEggService) {
+                              @Lazy WholeEggService wholeEggService,
+                              @Lazy CrackEggService crackEggService) {
         this.penRepository = penRepository;
         this.birdPenRecordRepository = birdPenRecordRepository;
         this.penEntryRepository = penEntryRepository;
         this.dayStateRepository = dayStateRepository;
         this.lockService = lockService;
         this.wholeEggService = wholeEggService;
+        this.crackEggService = crackEggService;
     }
 
     // ── Production by Pen ────────────────────────────────────────────────────
@@ -150,11 +156,11 @@ public class ProductionService {
     }
 
     private int crackEggGoodGift() {
-        return 0; // TODO(Crack Egg module)
+        return crackEggService.goodGiftQty();
     }
 
     private int crackEggGoodSales() {
-        return 0; // TODO(Crack Egg module)
+        return crackEggService.goodSalesQty();
     }
 
     // ── Day state (Category Stock Summary + Crack Egg tab) ──────────────────

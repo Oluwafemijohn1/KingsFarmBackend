@@ -10,9 +10,10 @@ build — update it as decisions change.
 Status: **Phase 0 and Phase 1 complete** (infra + JWT/API-key auth, admin user
 management with auto-generated passwords, security settings, bootstrap admin seed).
 **Phase 2 complete** (generic opening-stock locking + approval workflow, unified
-system_logs table, `@Audited` AOP aspect, login/logout access logging). Phase 3
-(per-module entities/endpoints) is next. This document is the plan, not a changelog —
-update it as decisions change, but treat it as living documentation, not history.
+system_logs table, `@Audited` AOP aspect, login/logout access logging). **Phase 3 in
+progress**: Bird Stock, Production, Whole Egg, and Crack Egg are done; Mortality and
+Feed Mill remain. This document is the plan, not a changelog — update it as decisions
+change, but treat it as living documentation, not history.
 
 ---
 
@@ -339,7 +340,7 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
   first): **Bird Stock ✅ done** → **Production ✅ done** → **Whole Egg ✅ done** →
-  Crack Egg → Mortality → Feed Mill.
+  **Crack Egg ✅ done** → Mortality → Feed Mill.
   - Bird Stock: `Pen` (catalog, soft-deactivate not hard-delete) + `BirdPenRecord`
     (one row per pen per day, unique on pen+date). Closing is never stored — always
     computed as `opening - mortality - birdSales + restocking`. A new day's row is
@@ -392,6 +393,32 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     admin gating of enteredBy/updatedBy (§3.4) is still not implemented anywhere,
     Whole Egg included — deliberately deferred to the Phase 6 hardening pass rather
     than retrofitted per-module mid-build; flagging again here so it isn't missed.
+  - Crack Egg: `CrackEggState` — a **singleton row** (id always 1), not a per-day
+    table, covering every "current value" scalar on CrackEggView (gcOpening,
+    gcSellingPrice, gcGiftQty/recipient/authorizer, rcOpening, rcFeedMill) — matches
+    §5.3's "running total, not per-day snapshot" pattern, same reasoning as Whole
+    Egg's `WeCategoryValue`. Deliberately kept independent of `ProductionDayState`'s
+    own `crackGoodOpen`/`crackRoughOpen` fields even though they look related — the
+    frontend itself reads two separate, never-synced `useState` values for these
+    (ProductionView vs CrackEggView), so the backend preserves that rather than
+    "fixing" it. `GcSaleTransaction`'s `credit`/`advance` are hand-typed by staff and
+    persisted as-is (unlike Whole Egg's `WeSaleTransaction`, where they're always
+    server-computed from a running balance) — ported deliberately differently per
+    `CESaleTxn`'s own frontend comment ("Manually entered by staff — not calculated
+    by the system"). Gift qty vs Feed Mill usage have an intentional validation
+    asymmetry, ported exactly from the two Save buttons in `CrackEggView.tsx`: Feed
+    Mill's Save is hard-blocked server-side (`BadRequestException`) once usage would
+    exceed available Rough Crack stock, while Gift only shows a soft visual warning
+    in the frontend and has no backend validation at all. `CrackEggGiftLogEntry` is a
+    permanent snapshot taken on "Save Gift" (reads `CrackEggState`'s live gift fields
+    at that moment) — editing a past log entry never touches the live state, matching
+    the frontend's `giftLog` exactly. Crack Egg ↔ Production is bidirectional the
+    same way Whole Egg ↔ Production is: `ProductionService` reads Crack Egg's
+    `goodGiftQty()`/`goodSalesQty()` via a `@Lazy CrackEggService` dependency (same
+    pattern as its `@Lazy WholeEggService`), while `CrackEggService` reads
+    Production's `getTodayDayState()` for `crackGoodProd`/`goodClassify`/
+    `crackRoughProd`/`roughClassify` non-lazily. Customer stays free text per §11
+    decision #3 — no directory, no running balance.
 - **Phase 4 — Reports**: real aggregation endpoints per module + general report;
   Relief Access endpoints; Admin logs backed by real `system_logs` rows.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
