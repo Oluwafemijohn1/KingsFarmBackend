@@ -338,8 +338,8 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     rather than guessed at now.
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
-  first): **Bird Stock ✅ done** → **Production ✅ done** → Whole Egg (incl. customers +
-  opening balance) → Crack Egg → Mortality → Feed Mill.
+  first): **Bird Stock ✅ done** → **Production ✅ done** → **Whole Egg ✅ done** →
+  Crack Egg → Mortality → Feed Mill.
   - Bird Stock: `Pen` (catalog, soft-deactivate not hard-delete) + `BirdPenRecord`
     (one row per pen per day, unique on pen+date). Closing is never stored — always
     computed as `opening - mortality - birdSales + restocking`. A new day's row is
@@ -365,6 +365,33 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     auto-feeds (crack use, sales, gift) are stubbed at zero in `ProductionService`
     with clear TODOs — replace once those modules exist, in the order the roadmap
     already specifies.
+  - Whole Egg: `Customer` directory (with one-time Opening Balance seeding — an
+    "opening"-type `WeSaleTransaction` with zero qty/prices, same pattern as a debt
+    payment) + `WeCategoryValue` (one small table, `kind` discriminator
+    OPENING/PRICE/SALES_CRACK/GIFT × category, unique per pair — these are running
+    totals the frontend keeps as always-current single values with no day dimension,
+    per this document's own §5.3, not per-day snapshots like Bird Stock/Production)
+    + `WeSaleTransaction` (sale/payment/opening, one canonical `occurredAt` timestamp
+    plus an indexed `txnYear` for the year-restricted-history requirement) +
+    `WeSaleLineItem` (sparse — one row per category actually sold). Credit/advance
+    are always computed server-side from amountPaid vs. what's owed (this
+    transaction's total plus whatever balance carried in from the customer's single
+    most recent transaction — a running balance, never summed across history) —
+    ported from submitSale/RecordPaymentModal/EditSaleTxnModal exactly, including
+    `priorBalanceFor` (the transaction immediately before this one for the same
+    customer). Per-transaction same-day edit lock (not a whole-day "Save Record" lock
+    like Bird Stock/Production) — each sale/payment/opening row is independently
+    editable only on the day it was made. Category request/response DTOs use a
+    `List<CategoryXEntry>` pattern instead of `Map<CatKey,V>` — Jackson's
+    `@JsonValue`/`@JsonCreator` on enum keys inside a Map is genuinely ambiguous
+    across Jackson versions, so this sidesteps it entirely rather than gambling on
+    unverifiable (sandbox can't compile) behavior. Whole Egg → Production
+    (crack use/sales/gift) is genuinely bidirectional with Production → Whole Egg
+    (Total Production feeds Whole Egg's Stock Overview) — `ProductionService` injects
+    `WholeEggService` as `@Lazy` to break the constructor-injection cycle. Field-level
+    admin gating of enteredBy/updatedBy (§3.4) is still not implemented anywhere,
+    Whole Egg included — deliberately deferred to the Phase 6 hardening pass rather
+    than retrofitted per-module mid-build; flagging again here so it isn't missed.
 - **Phase 4 — Reports**: real aggregation endpoints per module + general report;
   Relief Access endpoints; Admin logs backed by real `system_logs` rows.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,

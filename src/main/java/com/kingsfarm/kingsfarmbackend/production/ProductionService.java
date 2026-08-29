@@ -15,6 +15,8 @@ import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCatOpeningRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCrackFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdatePenEntryRequest;
+import com.kingsfarm.kingsfarmbackend.wholeegg.WholeEggService;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -33,10 +35,14 @@ import java.util.Locale;
  * the frontend's separate save/unlock toggle collapses into that one rule
  * here).
  *
- * TODO(Whole Egg module): wholeEggCrackUse/wholeEggTotalSales/wholeEggGift
- * are stubbed at zero — replace with real per-category sums from Whole Egg's
- * sales-crack commits, sale transactions, and gift commits once that module
- * exists (BACKEND_PLAN.md §6: Whole Egg → Production).
+ * wholeEggCrackUse/wholeEggTotalSales/wholeEggGift read live from
+ * WholeEggService (BACKEND_PLAN.md §6: Whole Egg → Production). That
+ * dependency is genuinely bidirectional — WholeEggService also reads this
+ * class's catProdTotals for its own Stock Overview (Production → Whole Egg:
+ * Total Production → Egg Production) — so wholeEggService is injected
+ * {@code @Lazy} here to break the constructor-injection cycle; whichever
+ * side gets constructed first no longer needs the other to already exist.
+ *
  * TODO(Crack Egg module): crackEggGoodGift/crackEggGoodSales are stubbed at
  * zero — replace with Crack Egg's gift qty and good-crack sale transaction
  * sum once that module exists (§6: Crack Egg → Production).
@@ -49,17 +55,20 @@ public class ProductionService {
     private final ProductionPenEntryRepository penEntryRepository;
     private final ProductionDayStateRepository dayStateRepository;
     private final OpeningStockLockService lockService;
+    private final WholeEggService wholeEggService;
 
     public ProductionService(PenRepository penRepository,
                               BirdPenRecordRepository birdPenRecordRepository,
                               ProductionPenEntryRepository penEntryRepository,
                               ProductionDayStateRepository dayStateRepository,
-                              OpeningStockLockService lockService) {
+                              OpeningStockLockService lockService,
+                              @Lazy WholeEggService wholeEggService) {
         this.penRepository = penRepository;
         this.birdPenRecordRepository = birdPenRecordRepository;
         this.penEntryRepository = penEntryRepository;
         this.dayStateRepository = dayStateRepository;
         this.lockService = lockService;
+        this.wholeEggService = wholeEggService;
     }
 
     // ── Production by Pen ────────────────────────────────────────────────────
@@ -126,18 +135,18 @@ public class ProductionService {
         return totals;
     }
 
-    // ── Cross-module auto-feeds (stubbed until the source module exists) ───
+    // ── Cross-module auto-feeds ──────────────────────────────────────────────
 
     private int wholeEggCrackUse(CatKey category) {
-        return 0; // TODO(Whole Egg module)
+        return wholeEggService.salesCrackFor(category);
     }
 
     private int wholeEggTotalSales(CatKey category) {
-        return 0; // TODO(Whole Egg module)
+        return wholeEggService.totalSalesFor(category);
     }
 
     private int wholeEggGift(CatKey category) {
-        return 0; // TODO(Whole Egg module)
+        return wholeEggService.giftFor(category);
     }
 
     private int crackEggGoodGift() {
