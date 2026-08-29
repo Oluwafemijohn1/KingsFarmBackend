@@ -10,9 +10,10 @@ build — update it as decisions change.
 Status: **Phase 0 and Phase 1 complete** (infra + JWT/API-key auth, admin user
 management with auto-generated passwords, security settings, bootstrap admin seed).
 **Phase 2 complete** (generic opening-stock locking + approval workflow, unified
-system_logs table, `@Audited` AOP aspect, login/logout access logging). **Phase 3 in
-progress**: Bird Stock, Production, Whole Egg, Crack Egg, and Mortality are done; only
-Feed Mill remains. This document is the plan, not a changelog — update it as decisions
+system_logs table, `@Audited` AOP aspect, login/logout access logging). **Phase 3
+complete**: Bird Stock, Production, Whole Egg, Crack Egg, Mortality, and Feed Mill are
+all done — every module has entities, endpoints, same-day/opening-stock locking, and
+attribution. This document is the plan, not a changelog — update it as decisions
 change, but treat it as living documentation, not history.
 
 ---
@@ -194,21 +195,26 @@ and reported on properly.
 - `mort_catfish_disposal_state`: id, entry_date (unique), catfish_qty, disposal_qty,
   entered_by, updated_by — one combined row per day, not split by category
 
-### 5.6 Feed Mill
-- `feed_ingredients`: id, name, unit, min_threshold
-- `feed_ingredient_stock_daily`: id, ingredient_id (FK), stock_date, opening, added,
-  used — daily figures, opening-locked like everywhere else
-- `feed_formulations`: id, feed_type, ingredient_id (FK), qty_per_ton — current live
-  formulation
-- `feed_formulation_history`: id, saved_at, feed_type, changed_by (FK users) — one row
-  per Save Formulation click
-- `feed_formulation_history_items`: id, history_id (FK), ingredient_id (FK), old_val,
+### 5.6 Feed Mill — as built (see Phase 3 roadmap entry below for the full reasoning)
+- `feed_ingredients`: id, name (unique), unit, opening (opening-stock-locked), added,
+  used, min, entered_by, updated_by — no day dimension at all, a single
+  always-current row per ingredient (§5.3 pattern), not `feed_ingredient_stock_daily`
+  as originally sketched here
+- `feed_types`: id, name (unique) — extensible catalog, no soft-deactivate
+- `feed_formulation_entries`: id, feed_type_id (FK), ingredient_id (FK), qty_per_ton
+  (live value), last_saved_qty_per_ton (durable substitute for the frontend's
+  ephemeral `formBaseline`) — unique on (feed_type_id, ingredient_id), sparse
+- `feed_formulation_history_groups`: id, feed_type_id (FK), changed_by, occurred_at —
+  one row per "Save Formulation" click that changed something
+- `feed_formulation_history_items`: id, group_id (FK), ingredient_id (FK), old_val,
   new_val
-- `feed_production_log`: id, prod_date, prod_time, feed_type, qty_tons, formulation_ref,
-  entered_by, updated_by
-- `feed_fish_stock`: id, fish_feed_type, stock_date, opening, added, collected
-- `feed_collection_log`: id, collected_at, collected_by (Farm/Prince — a location
-  label, not a user), fish_starter_kg, fish_grower_kg, fish_finisher_kg, entered_by,
+- `feed_production_log`: id, feed_type_id (FK), qty_tons, formulation_ref (nullable,
+  never auto-generated — see reasoning below), occurred_at, entered_by, updated_by
+- `fish_feed_stock`: id, type (unique — always exactly "Fish Starter"/"Fish
+  Grower"/"Fish Finisher"), opening (opening-stock-locked), added (auto-transfer
+  only), collected (accumulated only) — same no-day-dimension pattern as ingredients
+- `feed_collection_log`: id, collected_by (Farm/Prince — a location label, not a
+  user), fish_starter_kg, fish_grower_kg, fish_finisher_kg, occurred_at, entered_by,
   updated_by
 
 ### 5.7 Bird Stock & Production
@@ -345,7 +351,7 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 - **Phase 3 — Modules**, one at a time, each with entities + endpoints + same-day
   edit lock + attribution enforcement (recommended order — simplest/most foundational
   first): **Bird Stock ✅ done** → **Production ✅ done** → **Whole Egg ✅ done** →
-  **Crack Egg ✅ done** → **Mortality ✅ done** → Feed Mill.
+  **Crack Egg ✅ done** → **Mortality ✅ done** → **Feed Mill ✅ done — Phase 3 complete**.
   - Bird Stock: `Pen` (catalog, soft-deactivate not hard-delete) + `BirdPenRecord`
     (one row per pen per day, unique on pen+date). Closing is never stored — always
     computed as `opening - mortality - birdSales + restocking`. A new day's row is
@@ -457,6 +463,51 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     calling the latter via self-invocation from the read-only `stockOverview()` path
     would run its insert-if-missing inside a read-only transaction — worth reusing
     this pattern if a similar read/write split comes up in Feed Mill.
+  - Feed Mill: the largest single module, and — like Mortality — self-contained
+    (no cross-module dependency in or out, aside from its own internal Feed
+    Production → Fish Feed Stock transfer, which BACKEND_PLAN.md §6 already
+    describes as staying inside the module). No demo data is seeded anywhere in
+    this module — ingredients, feed types, and formulations all start empty and
+    are populated by the Feed Mill Manager, exactly like Bird Stock's `Pen`
+    catalog starts empty. `FeedIngredient` and `FishFeedStock` both have **no day
+    dimension at all** — confirmed by reading the frontend closely: unlike Bird
+    Stock/Production/Mortality's per-pen-per-day rows, Ingredient Inventory and
+    Fish Feed Stock behave exactly like Whole Egg's `WeCategoryValue`/Crack Egg's
+    `CrackEggState` (§5.3) — single always-current rows, no reset, no
+    carry-forward step anywhere in the code (only a comment saying closing
+    "becomes next day's opening," never actually implemented). Formulations
+    needed a genuine design decision beyond the original sketch: the frontend
+    tracks unsaved-vs-saved formulation values with an ephemeral React
+    `formBaseline` state that resets whenever the Feed Mill Manager switches
+    which feed type they're viewing — since this backend persists every field
+    write immediately (no draft concept), `FeedFormulationEntry` instead carries
+    a permanent `lastSavedQtyPerTon` column alongside the live `qtyPerTon`, and
+    `saveFormulation` diffs against that (then advances it) rather than trying to
+    replicate the frontend's page-local baseline — more durable than the
+    frontend's own approach, not just a port of it. Feed Production's
+    `formulationRef` (shown as `"FM-2026-03"` in the frontend) is static
+    placeholder text with zero real versioning logic behind it in the frontend
+    itself — kept as an optional, never-auto-generated column rather than
+    inventing a fake numbering scheme. `updateProductionEntry`'s edit path
+    reconciles both ingredient usage AND Fish Feed Stock's `added` in one
+    delta-based pass (old formulation × old qty subtracted, new formulation × new
+    qty added), exactly like the frontend's own function of the same name — and,
+    matching the frontend exactly, has **no** shortfall validation on edit, only
+    on the original production run (`runProduction`/`checkProduction`). The
+    Ingredient Usage by Feed Type table on the Reports tab was deliberately left
+    unbuilt even though the frontend computes it from real state (not synthetic
+    demo data like the rest of that tab) — it's still presentation logic that
+    belongs with the rest of real Reports aggregation in Phase 4, and can be
+    built there from `feed_production_log` + `feed_formulation_entries` once
+    Phase 4 starts; scoping it into Phase 3 would have been inconsistent with
+    every other module's Reports tab being deferred. Also introduced the same
+    dense-vs-sparse fix caught during review: the Formulations tab's
+    `formulation()` endpoint returns one row per ingredient in the whole catalog
+    (zero-filled where no formulation row exists yet), not just the sparse rows
+    that happen to exist — the frontend iterates over every ingredient there,
+    unlike `checkProduction`'s requirements list, which stays sparse (only
+    ingredients actually in that feed type's formulation), matching
+    `Object.entries(formulation)` in the frontend.
 - **Phase 4 — Reports**: real aggregation endpoints per module + general report;
   Relief Access endpoints; Admin logs backed by real `system_logs` rows.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
