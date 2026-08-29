@@ -2,16 +2,19 @@ package com.kingsfarm.kingsfarmbackend.wholeegg;
 
 import com.kingsfarm.kingsfarmbackend.common.CatKey;
 import com.kingsfarm.kingsfarmbackend.common.PageResponse;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.security.AuthenticatedPrincipal;
 import com.kingsfarm.kingsfarmbackend.wholeegg.dto.*;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /** Same role split as every other module so far: Administrator + Whole Egg Manager can read, only Whole Egg Manager can write. */
@@ -128,5 +131,18 @@ public class WholeEggController {
                                                                      @PageableDefault(size = 20) Pageable pageable) {
         boolean isAdmin = principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
         return PageResponse.from(service.allTransactions(isAdmin, pageable).map(service::toResponse));
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────
+
+    @GetMapping("/reports/daily")
+    public ReportTableResponse dailyReport(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return service.dailyReport(start, end);
+    }
+
+    @GetMapping("/reports/monthly")
+    public ReportTableResponse monthlyReport(@RequestParam(defaultValue = "12") int months) {
+        return service.monthlyReport(months);
     }
 }

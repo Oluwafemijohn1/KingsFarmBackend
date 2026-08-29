@@ -1,15 +1,19 @@
 package com.kingsfarm.kingsfarmbackend.crackegg;
 
 import com.kingsfarm.kingsfarmbackend.common.PageResponse;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.crackegg.dto.*;
 import com.kingsfarm.kingsfarmbackend.security.AuthenticatedPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 /** Same role split as every other module: Administrator + Crack Egg Manager read, only Crack Egg Manager writes. */
 @RestController
@@ -131,5 +135,18 @@ public class CrackEggController {
     public PageResponse<GiftLogEntryResponse> giftLogHistory(@PageableDefault(size = 20) Pageable pageable) {
         return PageResponse.from(service.giftLogHistory(pageable)
                 .map(e -> GiftLogEntryResponse.from(e, service.isEditable(e.getOccurredAt()))));
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────
+
+    @GetMapping("/reports/daily")
+    public ReportTableResponse dailyReport(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return service.dailyReport(start, end);
+    }
+
+    @GetMapping("/reports/monthly")
+    public ReportTableResponse monthlyReport(@RequestParam(defaultValue = "12") int months) {
+        return service.monthlyReport(months);
     }
 }

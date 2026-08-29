@@ -55,6 +55,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.LOCKED, ex.getMessage(), req, null);
     }
 
+    @ExceptionHandler(OnLeaveException.class)
+    public ResponseEntity<ApiError> handleOnLeave(OnLeaveException ex, HttpServletRequest req) {
+        return build(HttpStatus.LOCKED, ex.getMessage(), req, null);
+    }
+
     @ExceptionHandler(PasswordChangeRequiredException.class)
     public ResponseEntity<ApiError> handlePasswordChangeRequired(PasswordChangeRequiredException ex, HttpServletRequest req) {
         ApiError body = new ApiError(HttpStatus.FORBIDDEN.value(), "PASSWORD_CHANGE_REQUIRED", ex.getMessage(), req.getRequestURI());

@@ -4,6 +4,7 @@ import com.kingsfarm.kingsfarmbackend.audit.Audited;
 import com.kingsfarm.kingsfarmbackend.common.Mod;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.relief.ReliefAccessService;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
 import com.kingsfarm.kingsfarmbackend.user.dto.*;
 import org.springframework.data.domain.Page;
@@ -22,10 +23,12 @@ public class UserAdminService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ReliefAccessService reliefAccessService;
 
-    public UserAdminService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public UserAdminService(UserRepository userRepository, PasswordEncoder passwordEncoder, ReliefAccessService reliefAccessService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.reliefAccessService = reliefAccessService;
     }
 
     @Audited(module = Mod.ADMIN, action = "Create User", type = LogType.AUDIT,
@@ -64,13 +67,24 @@ public class UserAdminService {
         return UserSummaryResponse.from(userRepository.save(user));
     }
 
+    /**
+     * Deactivating a user also revokes every active Relief Access grant tied
+     * to them, on either side — matches the frontend's setAccountActive
+     * comment ("clears any relief grants tied to that username, either
+     * side, so the access picture stays consistent"). Reactivating never
+     * restores a grant; the Administrator would need to grant it again.
+     */
     @Audited(module = Mod.ADMIN, action = "Set User Active", type = LogType.AUDIT,
             detail = "'User #' + #id + ' -> ' + (#active ? 'Activated' : 'Deactivated')")
     @Transactional
-    public UserSummaryResponse setActive(Long id, boolean active) {
+    public UserSummaryResponse setActive(Long id, boolean active, String actingUsername) {
         User user = findOrThrow(id);
         user.setActive(active);
-        return UserSummaryResponse.from(userRepository.save(user));
+        User saved = userRepository.save(user);
+        if (!active) {
+            reliefAccessService.revokeAllForUser(saved, actingUsername);
+        }
+        return UserSummaryResponse.from(saved);
     }
 
     @Audited(module = Mod.ADMIN, action = "Reset Password", type = LogType.AUDIT,

@@ -13,4 +13,7 @@ public interface MortPenEntryRepository extends JpaRepository<MortPenEntry, Long
     Optional<MortPenEntry> findByPenAndEntryDate(Pen pen, LocalDate entryDate);
     List<MortPenEntry> findAllByEntryDate(LocalDate entryDate);
     Page<MortPenEntry> findAllByPenOrderByEntryDateDesc(Pen pen, Pageable pageable);
+
+    /** Every pen's rows in a date range, inclusive — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    List<MortPenEntry> findAllByEntryDateBetween(LocalDate start, LocalDate end);
 }

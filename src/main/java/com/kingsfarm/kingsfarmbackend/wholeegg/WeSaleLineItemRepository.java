@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, Long> {
@@ -25,5 +26,16 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
     interface CategoryQtyProjection {
         CatKey getCategory();
         long getQty();
+    }
+
+    /** Every line item belonging to a SALE-type transaction in a half-open instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    @Query("select li.transaction.occurredAt as occurredAt, li.qty as qty, li.price as price from WeSaleLineItem li " +
+            "where li.transaction.type = :type and li.transaction.occurredAt >= :start and li.transaction.occurredAt < :end")
+    List<SaleLineProjection> lineItemsInRange(@Param("type") WeSaleTxnType type, @Param("start") Instant start, @Param("end") Instant end);
+
+    interface SaleLineProjection {
+        Instant getOccurredAt();
+        int getQty();
+        long getPrice();
     }
 }

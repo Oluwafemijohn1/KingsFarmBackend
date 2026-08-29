@@ -1,5 +1,6 @@
 package com.kingsfarm.kingsfarmbackend.security;
 
+import com.kingsfarm.kingsfarmbackend.user.Role;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,6 +13,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -37,7 +39,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = header.substring("Bearer ".length());
             AuthenticatedPrincipal principal = jwtService.parse(token);
             if (principal != null) {
-                List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + principal.role().name()));
+                // Primary role plus any Relief Access grants active at token-issuance time (see
+                // AuthenticatedPrincipal/ReliefGrant's javadoc) — additive, never a replacement.
+                List<GrantedAuthority> authorities = new ArrayList<>();
+                authorities.add(new SimpleGrantedAuthority("ROLE_" + principal.role().name()));
+                for (Role extra : principal.extraRoles()) {
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + extra.name()));
+                }
                 var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }

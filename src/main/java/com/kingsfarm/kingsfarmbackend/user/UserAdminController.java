@@ -41,8 +41,9 @@ public class UserAdminController {
     }
 
     @PatchMapping("/{id}/active")
-    public UserSummaryResponse setActive(@PathVariable Long id, @Valid @RequestBody SetActiveRequest request) {
-        return service.setActive(id, request.active());
+    public UserSummaryResponse setActive(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                          @PathVariable Long id, @Valid @RequestBody SetActiveRequest request) {
+        return service.setActive(id, request.active(), principal.username());
     }
 
     @PostMapping("/{id}/reset-password")

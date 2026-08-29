@@ -6,6 +6,9 @@ import com.kingsfarm.kingsfarmbackend.common.PaymentMethod;
 import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.crackegg.dto.*;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.ProductionDayState;
@@ -18,9 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Backs CrackEggView in full. Good Crack's Production/Received figures
@@ -257,6 +264,66 @@ public class CrackEggService {
     @Transactional(readOnly = true)
     public Page<CrackEggGiftLogEntry> giftLogHistory(Pageable pageable) {
         return giftLogRepository.findAllByOrderByOccurredAtDesc(pageable);
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+    // roughToFeed/closing are deliberately not columns here — CrackEggState is
+    // a live running total with no per-day history (see §8's gap note), so
+    // there's nothing real to sum for either.
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("goodSales", "Good Crack Sales (qty)", true),
+            new ReportColumn("goodRevenue", "Good Crack Revenue", false),
+            new ReportColumn("gifts", "Gifted", true)
+    );
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<LocalDate, List<GcSaleTransaction>> salesByDate = salesInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(t -> t.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, List<CrackEggGiftLogEntry>> giftsByDate = giftsInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(g -> g.getOccurredAt().atZone(ZONE).toLocalDate()));
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        Instant rangeStart = ReportPeriods.startOfDay(monthsList.getFirst().atDay(1));
+        Instant rangeEnd = ReportPeriods.startOfNextDay(monthsList.getLast().atEndOfMonth());
+        Map<YearMonth, List<GcSaleTransaction>> salesByMonth = salesInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(t -> YearMonth.from(t.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, List<CrackEggGiftLogEntry>> giftsByMonth = giftsInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(g -> YearMonth.from(g.getOccurredAt().atZone(ZONE).toLocalDate())));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    private List<GcSaleTransaction> salesInRange(Instant start, Instant end) {
+        return saleRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(start, end);
+    }
+
+    private List<CrackEggGiftLogEntry> giftsInRange(Instant start, Instant end) {
+        return giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(start, end);
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<GcSaleTransaction> sales, List<CrackEggGiftLogEntry> gifts) {
+        int goodSales = sales.stream().mapToInt(GcSaleTransaction::getQty).sum();
+        long goodRevenue = sales.stream().mapToLong(t -> (long) t.getQty() * t.getPrice()).sum();
+        int giftQty = gifts.stream().mapToInt(CrackEggGiftLogEntry::getQty).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("goodSales", goodSales);
+        row.put("goodRevenue", goodRevenue);
+        row.put("gifts", giftQty);
+        return row;
     }
 
     private void validatePaymentMethods(List<PaymentMethod> methods, String bank) {

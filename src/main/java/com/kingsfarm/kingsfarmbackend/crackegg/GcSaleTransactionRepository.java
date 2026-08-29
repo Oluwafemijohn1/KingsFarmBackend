@@ -5,6 +5,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface GcSaleTransactionRepository extends JpaRepository<GcSaleTransaction, Long> {
@@ -16,4 +17,7 @@ public interface GcSaleTransactionRepository extends JpaRepository<GcSaleTransac
 
     @Query("select coalesce(sum(t.qty * t.price), 0) from GcSaleTransaction t")
     long sumRevenue();
+
+    /** Every sale in a half-open instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    List<GcSaleTransaction> findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(Instant start, Instant end);
 }

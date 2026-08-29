@@ -25,6 +25,9 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
     Page<WeSaleTransaction> findAllByCustomerAndTxnYearOrderByOccurredAtDesc(Customer customer, int txnYear, Pageable pageable);
     Page<WeSaleTransaction> findAllByTxnYearOrderByOccurredAtDesc(int txnYear, Pageable pageable);
 
+    /** Every SALE-type transaction in a half-open [start, end) instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    List<WeSaleTransaction> findAllByTypeAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(WeSaleTxnType type, Instant start, Instant end);
+
     /** Ranks customers by how recently they last bought — feeds the New Sale picker's "recent customers" shortlist before anyone types. */
     @Query("select t.customer.id as customerId, max(t.occurredAt) as lastAt from WeSaleTransaction t group by t.customer.id order by max(t.occurredAt) desc")
     List<CustomerActivityProjection> customerActivityRanking(Pageable pageable);

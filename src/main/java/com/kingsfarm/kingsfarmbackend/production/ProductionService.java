@@ -9,6 +9,9 @@ import com.kingsfarm.kingsfarmbackend.common.CatKey;
 import com.kingsfarm.kingsfarmbackend.common.Mod;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow;
 import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
@@ -24,8 +27,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Backs ProductionView's Whole Egg tab (Production by Pen + Category Stock
@@ -288,5 +295,64 @@ public class ProductionService {
     @Transactional(readOnly = true)
     public Page<ProductionDayState> dayStateHistory(Pageable pageable) {
         return dayStateRepository.findAllByOrderByEntryDateDesc(pageable);
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("crates", "Crates", true),
+            new ReportColumn("pct", "Prod %", true),
+            new ReportColumn("xL", "XL", true),
+            new ReportColumn("lg", "Large", true),
+            new ReportColumn("md", "Medium", true)
+    );
+
+    /** Every pen's real closing stock in a range, summed per day — one query for the whole range rather than one per day/month (see reportRow callers below). */
+    private Map<LocalDate, Integer> birdClosingByDayInRange(LocalDate start, LocalDate end) {
+        return birdPenRecordRepository.findAllByEntryDateBetween(start, end).stream()
+                .collect(Collectors.groupingBy(BirdPenRecord::getEntryDate, Collectors.summingInt(BirdPenRecord::closing)));
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        List<ProductionPenEntry> entries = penEntryRepository.findAllByEntryDateBetween(start, end);
+        Map<LocalDate, List<ProductionPenEntry>> byDate = entries.stream().collect(Collectors.groupingBy(ProductionPenEntry::getEntryDate));
+        Map<LocalDate, Integer> birdClosingByDay = birdClosingByDayInRange(start, end);
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of()), birdClosingByDay.getOrDefault(date, 0)))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        LocalDate start = monthsList.getFirst().atDay(1);
+        LocalDate end = monthsList.getLast().atEndOfMonth();
+        List<ProductionPenEntry> entries = penEntryRepository.findAllByEntryDateBetween(start, end);
+        Map<YearMonth, List<ProductionPenEntry>> byMonth = entries.stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getEntryDate())));
+        Map<LocalDate, Integer> birdClosingByDay = birdClosingByDayInRange(start, end);
+        Map<YearMonth, Integer> birdClosingByMonth = birdClosingByDay.entrySet().stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getKey()), Collectors.summingInt(Map.Entry::getValue)));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of()), birdClosingByMonth.getOrDefault(month, 0)))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod) {
+        int xl = entries.stream().mapToInt(ProductionPenEntry::getQtyXl).sum();
+        int lg = entries.stream().mapToInt(ProductionPenEntry::getQtyLg).sum();
+        int md = entries.stream().mapToInt(ProductionPenEntry::getQtyMd).sum();
+        int crates = entries.stream().mapToInt(ProductionPenEntry::total).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("crates", crates);
+        row.put("pct", productionPercent(crates, birdClosingForPeriod));
+        row.put("xL", xl);
+        row.put("lg", lg);
+        row.put("md", md);
+        return row;
     }
 }

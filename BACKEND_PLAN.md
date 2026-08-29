@@ -13,8 +13,13 @@ management with auto-generated passwords, security settings, bootstrap admin see
 system_logs table, `@Audited` AOP aspect, login/logout access logging). **Phase 3
 complete**: Bird Stock, Production, Whole Egg, Crack Egg, Mortality, and Feed Mill are
 all done — every module has entities, endpoints, same-day/opening-stock locking, and
-attribution. This document is the plan, not a changelog — update it as decisions
-change, but treat it as living documentation, not history.
+attribution. **Phase 4 complete**: Relief Access (login blocking + JWT extra-authority grants);
+Admin Logs were already real since Phase 2; Reports (§8) now run on real DB
+aggregation for all six modules plus the General Report — `/reports/daily`,
+`/reports/monthly` per module, `/api/v1/reports/general` for the farm-wide summary.
+**Phase 5 (frontend integration) and Phase 6 (security hardening) remain.** This
+document is the plan, not a changelog — update it as decisions change, but treat it as
+living documentation, not history.
 
 ---
 
@@ -286,19 +291,96 @@ they can't in the current in-memory model.
 
 ## 8. Reports — a real upgrade, not just a port
 
-Today's Reports tabs (Today/Week/Month/Quarter/Half-Year/Year) run entirely on
-pre-authored synthetic data, because the frontend has never had real historical
-storage — even "Entered By" there is a deterministic fake value, by design (see the
-memory note on this). **Once records actually persist in MySQL, Reports should become
-real aggregation queries** (`SUM`/`COUNT`/`GROUP BY` over date ranges) instead of
-synthetic data. This is a meaningful upgrade beyond a straight port:
-- Real Entered By + timestamp per period, no synthetic fallback needed.
-- The customer visit-frequency filter becomes genuinely meaningful once purchases
-  span real different days, instead of everything always being "today."
-- Drill-down (day → transactions) becomes a real query instead of reusing the flat
-  Today table.
+**Decided (§11 item 1): real DB aggregation, built during Phase 4.** Today's Reports
+tabs (Today/Week/Month/Quarter/Half-Year/Year) ran entirely on pre-authored synthetic
+data in the frontend, because the demo never had real historical storage — even
+"Entered By" there was a deterministic fake value, by design. Now that every module's
+records actually persist in MySQL (Phase 3), Reports is backed by real
+`SUM`/`COUNT`/`GROUP BY` aggregation over date ranges.
 
-Flagged as an open decision in §11 — confirm before Phase 4.
+**This is deliberately not a literal port of the frontend's six-bucket shape.** A full
+read of `ReportsPanel.tsx` (973 lines) showed the real consumption pattern isn't "6
+independent period buckets" — `data.monthly.tableRows` is essentially dead weight: the
+table body for a *month view* is actually synthesized client-side by cycling the
+*weekly* bucket's 7-day pattern across the month (`generateDaysForMonth`), a hack that
+only existed because the demo had no real per-day history to draw a real month from.
+Only `data.monthly.stats` (the four stat cards) was ever genuinely consumed from that
+bucket. Every period's top-level stat cards are already re-derivable from row data —
+`ReportsPanel` already has an `aggregateStats` helper that does exactly this for custom
+date ranges today.
+
+So instead of 6 buckets, every module (Bird Stock, Production, Whole Egg, Crack Egg,
+Mortality, Feed Mill) exposes exactly **two** new read endpoints, both under
+`/reports/`:
+- **`GET /reports/daily?start=&end=`** — one row per calendar day in the (inclusive,
+  ≤366-day) range. Feeds the Week tab and any custom range; the frontend derives its
+  own stat cards from the rows via `aggregateStats`, same as it does for custom ranges
+  today.
+- **`GET /reports/monthly?months=N`** — one row per trailing calendar month, N from 1
+  to 24. Feeds Quarter (`N=3`), Half-Year (`N=6`), and Year (`N=12`) — a real
+  month-by-month breakdown, not a day-cycling hack.
+- The **Today** per-entity tab (per pen / per category / per feed type, for today
+  specifically) is **not** a new endpoint — it reuses each module's existing Phase 3
+  "today" endpoint (`/mortality/stock`, `/bird-stock/records/today`,
+  `/feed-mill/ingredients`, etc.), since that data already exists in exactly the right
+  shape.
+- Export to Excel/PDF/Word and the trend chart are entirely frontend-side (xlsx/jspdf/
+  docx/recharts) — no backend involvement, then or now.
+
+Both endpoints return the same shared shape, `common.reports.ReportTableResponse`
+(`{columns: [{key,label,mono}], rows: [{period, ...metric: value}]}`) — plain
+`LinkedHashMap` rows keyed by plain `String`s, so none of the enum-key Jackson
+ambiguity that motivated `List<Entry>` DTOs elsewhere applies here. Row/period
+generation (day list, trailing-month list, day/month display labels, `LocalDate`↔
+`Instant` range conversion) is centralized in `common.reports.ReportPeriods`.
+
+**Known real-data gap, by module** (flagged rather than faked): several modules only
+store a *live running total* for stock levels, with no per-day historical snapshot —
+`WeCategoryValue` (Whole Egg), `CrackEggState` (Crack Egg, singleton row),
+`MortCategoryValue` (Mortality), `FeedIngredient`/`FishFeedStock` (Feed Mill). A
+"closing stock as of date X" figure for these can't be queried, only reconstructed by
+replaying every delta up to that date — expensive and out of scope for this pass. The
+report columns below only include metrics with a genuine per-day (or per-instant) log
+to sum; columns the frontend's synthetic data implied but that have no real historical
+source (Crack Egg's `roughToFeed`/`closing`, Feed Mill's `alerts`) are dropped rather
+than faked. Current-state equivalents (live low-stock ingredients, today's closing
+stock) remain available via each module's existing Phase 3 endpoints.
+
+Per-module column sets (same columns at both daily and monthly granularity):
+- **Bird Stock**: `opening, mortality, sales, restock, closing` — summed/recomputed
+  from `BirdPenRecord` across all pens for each day (closing is `BirdPenRecord.closing()`
+  summed, a pure function of stored ints, so this one *does* have real historical
+  closing stock, unlike the running-total modules above).
+- **Production**: `crates, pct, xL, lg, md` — summed from `ProductionPenEntry` per day;
+  `pct` reuses `ProductionService.productionPercent(crates, birdClosing)` with
+  `birdClosing` from Bird Stock's real closing total for that same day.
+- **Whole Egg**: `txns, crates, revenue, avg` — from `WeSaleTransaction`/`WeSaleLineItem`
+  where `type = SALE`, grouped by day; `revenue = sum(qty * price)` (matches
+  `WeSaleTransactionResponse`'s live computation).
+- **Crack Egg**: `goodSales, goodRevenue, gifts` — `goodSales`/`goodRevenue` from
+  `GcSaleTransaction` (`qty`, `qty*price`), `gifts` from `CrackEggGiftLogEntry.qty`.
+  `roughToFeed` and `closing` dropped (no historical log — see gap note above).
+- **Mortality**: `total, sales, salesRevenue, gifts, catfish, disposal` — `total` from
+  `MortPenEntry` (sum of `total()` across pens/day), `sales`/`salesRevenue` from
+  `MortSaleEntry`, `gifts` from `MortGiftLogEntry` (sum of `good+dry+runt`), `catfish`/
+  `disposal` from `MortCatfishDisposalState` (already keyed by `entryDate`, a real
+  per-day row).
+- **Feed Mill**: `produced, ingrUsed, fishCollected` — `produced` (tons) from
+  `FeedProductionLogEntry.qtyTons`, `fishCollected` from `FeedCollectionLogEntry.total()`;
+  `ingrUsed` is derived (production qty × that feed type's current formulation
+  `qtyPerTon`, replayed over each range-filtered production row — the same math
+  `runProduction` uses live, applied historically) since there's no per-day ingredient-
+  usage log, only a live cumulative `FeedIngredient.used`. `alerts` dropped (low-stock is
+  a live-only concept, no historical snapshot — see gap note above).
+
+**General Report** (`GeneralReportView.tsx`) is structurally different from the other
+six — its rows are "one row per module" (Production/Whole Egg/Crack Egg/Mortality/Feed
+Mill), not "one row per day," for whatever date range is selected. It gets its own
+top-level `GET /api/v1/reports/general?start=&end=` endpoint (new `reports` package,
+Administrator-only, matching `canExport={false}` and its "Managing Director" framing in
+the frontend) that composes each module's own range-sum logic rather than re-deriving
+it — one row per module with `revenue`/`sales`/`share` (share = that module's revenue as
+a % of total revenue across all modules in range).
 
 ---
 
@@ -508,8 +590,68 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     unlike `checkProduction`'s requirements list, which stays sparse (only
     ingredients actually in that feed type's formulation), matching
     `Object.entries(formulation)` in the frontend.
-- **Phase 4 — Reports**: real aggregation endpoints per module + general report;
-  Relief Access endpoints; Admin logs backed by real `system_logs` rows.
+- **Phase 4 — Reports & Relief Access** ✅ done (Relief Access ✅ done; Admin Logs already
+  real since Phase 2 — see SystemLogController; Reports ✅ done — real DB aggregation,
+  see §8 for the full design and the roadmap entry below for what got built):
+  - Relief Access: new `relief` package — `ReliefGrant` entity (`on_leave_user_id`/
+    `grantee_user_id` FKs to `User`, `reason`, `granted_by`, `granted_at`, `active`,
+    `revoked_at`, `revoked_by` — matches §5.1's sketch exactly) + `ReliefGrantRepository`
+    + `ReliefAccessService` + `ReliefAccessController` at
+    `/api/v1/admin/relief-access`, Administrator-only throughout. `grant()` replicates
+    `submitGrant`'s validation from ReliefAccessView.tsx exactly: can't cover for
+    yourself, the on-leave party can't already have an active grant (error message
+    names the existing grantee, same as the frontend), and — a rule the frontend
+    enforces implicitly via its `eligibleUsers` filter rather than a validation
+    message — neither party can be an Administrator.
+  - The two real mechanics an in-memory frontend demo never had to solve: **(1)
+    blocking login** — `AuthService.login` now checks
+    `reliefAccessService.activeLeaveFor(user)` *after* the password already matched
+    (same order as the frontend's `handleLogin`, so a wrong-password attempt never
+    reveals on-leave status), throwing a new `OnLeaveException` (mapped to 423 LOCKED,
+    alongside `AccountLockedException`) with the same message shape as the frontend's
+    `activeLeave` check. `AuthService.refresh` enforces the same check — the frontend
+    never had a refresh-token concept to compare against, but leaving it unchecked
+    there would mean a grant taking effect mid-session never actually cut anyone off,
+    undermining the whole point of "covering while they're away." **(2) granting the
+    reliever extra module access** — this backend's `@PreAuthorize("hasRole(...)")`
+    checks are role-name-based, not the frontend's flexible per-user module list, so
+    an active grant has to surface as an *additional granted authority* on the
+    grantee's own token. `JwtService.generateAccessToken` gained an `extraRoles`
+    parameter (baked into a new `extraRoles` JWT claim); `JwtAuthenticationFilter` now
+    grants `ROLE_<primary>` plus `ROLE_<extra>` for each; `AuthenticatedPrincipal`
+    gained an `extraRoles` field to carry it. `AuthService` computes
+    `reliefAccessService.extraRolesFor(user)` at both login and refresh time and bakes
+    it into every token issued — same "recomputed at issuance, not on every request"
+    staleness tradeoff `AuthenticatedPrincipal`'s own javadoc already documents for
+    account deactivation, now documented there for this too. `LoginResponse` also
+    returns `extraRoles` directly so Phase 5's frontend integration doesn't have to
+    decode the JWT just to render the "Relief" sidebar tag.
+  - Deactivating a user (`UserAdminService.setActive`, now taking the acting admin's
+    username) cascades into `reliefAccessService.revokeAllForUser` — revokes every
+    active grant naming that account on *either* side, matching the frontend's
+    `setAccountActive` comment about keeping the access picture consistent. Not
+    `@Audited` itself (the deactivation that triggered it already produces its own
+    audit row).
+  - Reports: new `common.reports` package (`ReportColumn`, `ReportTableResponse`,
+    `ReportPeriods`) shared by all six modules plus the General Report — see §8 for the
+    full design rationale (why two endpoints per module instead of a literal six-bucket
+    port, the per-module column sets, and the known real-data gaps). Every module
+    (`birdstock`, `production`, `wholeegg`, `crackegg`, `mortality`, `feedmill`) gained
+    `GET /reports/daily?start=&end=` and `GET /reports/monthly?months=` on its existing
+    controller, plus one or two new repository range-query methods and a
+    `dailyReport`/`monthlyReport` pair on its existing service — no new services for the
+    six modules, since this reuses the same repositories/entities Phase 3 already built.
+    New top-level `reports` package (`GeneralReportService` + `GeneralReportController`
+    at `/api/v1/reports/general`, Administrator-only) composes the five relevant
+    modules' own `dailyReport` output rather than re-deriving revenue/output totals —
+    sums specific columns out of each module's returned rows (e.g. Whole Egg's
+    `revenue`/`crates`, Mortality's `salesRevenue`/`sales`) to build the "one row per
+    module" shape `GeneralReportView.tsx` expects. Production's `dailyReport`/
+    `monthlyReport` needed Bird Stock's real per-day closing stock as the weighted
+    denominator for its `pct` column — added `birdClosingByDayInRange` (one query for
+    the whole range, grouped in Java) rather than one query per day, after an
+    independent review pass caught the original per-day-query version as a real,
+    if minor, N+1 pattern.
 - **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
   module by module, verifying each screen still behaves exactly as it does today.
 - **Phase 6 — Security & hardening pass**: rate limiting, CORS review, actuator
@@ -520,8 +662,8 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 
 ## 11. Open Decisions (need your input before or during the relevant phase)
 
-1. **Reports**: confirm real DB aggregation (§8) is wanted now, vs. keeping the
-   synthetic-data approach a while longer and porting it as-is first.
+1. ~~Reports~~ — **decided**: real DB aggregation, built during Phase 4 (§8), not a
+   literal port of the frontend's synthetic six-bucket shape.
 2. **Token storage on the frontend**: localStorage (simpler, some XSS exposure) vs. an
    httpOnly cookie set by the backend (more setup, better protection) for the JWT.
 3. ~~Crack Egg customer~~ — **decided**: stays free-text, no customer directory or

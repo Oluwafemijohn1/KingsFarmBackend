@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -29,6 +30,7 @@ public class JwtService {
     private static final String CLAIM_USER_ID = "uid";
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_MUST_CHANGE_PASSWORD = "mcp";
+    private static final String CLAIM_EXTRA_ROLES = "extraRoles";
 
     private final SecretKey signingKey;
     private final Duration accessTokenTtl;
@@ -39,12 +41,19 @@ public class JwtService {
     }
 
     public String generateAccessToken(Long userId, String username, Role role, boolean mustChangePassword) {
+        return generateAccessToken(userId, username, role, mustChangePassword, List.of());
+    }
+
+    /** {@code extraRoles} bakes in any Relief Access grants active for this user as the relieving officer at issuance time — see AuthenticatedPrincipal's javadoc for the staleness tradeoff this accepts. */
+    public String generateAccessToken(Long userId, String username, Role role, boolean mustChangePassword, List<Role> extraRoles) {
         Instant now = Instant.now();
+        List<String> extraRoleNames = extraRoles.stream().map(Role::name).toList();
         return Jwts.builder()
                 .subject(username)
                 .claim(CLAIM_USER_ID, userId)
                 .claim(CLAIM_ROLE, role.name())
                 .claim(CLAIM_MUST_CHANGE_PASSWORD, mustChangePassword)
+                .claim(CLAIM_EXTRA_ROLES, extraRoleNames)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl)))
                 .signWith(signingKey)
@@ -62,7 +71,11 @@ public class JwtService {
             Long userId = claims.get(CLAIM_USER_ID, Long.class);
             Role role = Role.valueOf(claims.get(CLAIM_ROLE, String.class));
             boolean mustChangePassword = Boolean.TRUE.equals(claims.get(CLAIM_MUST_CHANGE_PASSWORD, Boolean.class));
-            return new AuthenticatedPrincipal(userId, claims.getSubject(), role, mustChangePassword);
+            @SuppressWarnings("unchecked")
+            List<String> extraRoleNames = claims.get(CLAIM_EXTRA_ROLES, List.class);
+            List<Role> extraRoles = extraRoleNames == null ? List.of()
+                    : extraRoleNames.stream().map(Role::valueOf).toList();
+            return new AuthenticatedPrincipal(userId, claims.getSubject(), role, mustChangePassword, extraRoles);
         } catch (JwtException | IllegalArgumentException ex) {
             return null;
         }

@@ -16,4 +16,7 @@ public interface BirdPenRecordRepository extends JpaRepository<BirdPenRecord, Lo
 
     /** Most recent record strictly before the given date — how a new day's opening is carried forward. */
     Optional<BirdPenRecord> findFirstByPenAndEntryDateLessThanOrderByEntryDateDesc(Pen pen, LocalDate entryDate);
+
+    /** Every pen's rows in a date range, inclusive — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    List<BirdPenRecord> findAllByEntryDateBetween(LocalDate start, LocalDate end);
 }

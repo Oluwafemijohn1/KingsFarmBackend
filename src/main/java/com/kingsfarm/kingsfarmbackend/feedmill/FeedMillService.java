@@ -6,6 +6,9 @@ import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.feedmill.dto.*;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
@@ -16,11 +19,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Backs FeedMillView in full: Ingredient Inventory, Feed Production
@@ -507,5 +515,80 @@ public class FeedMillService {
     @Transactional(readOnly = true)
     public Page<FeedCollectionLogEntry> collectionHistory(Pageable pageable) {
         return collectionRepository.findAllByOrderByOccurredAtDesc(pageable);
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+    // "alerts" (low-stock ingredients) is deliberately not a column here —
+    // FeedIngredient.closing()/low() are live-only, no historical snapshot to
+    // sum over a range (see §8's gap note). Current low-stock ingredients
+    // remain available via GET /feed-mill/ingredients (lowIngredients()).
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("produced", "Produced (tons)", true),
+            new ReportColumn("ingrUsed", "Ingredients Used (kg)", true),
+            new ReportColumn("fishCollected", "Fish Feed Collected (kg)", true)
+    );
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<Long, Double> formulationRatioCache = new HashMap<>();
+        Map<LocalDate, List<FeedProductionLogEntry>> productionByDate = productionRepository
+                .findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> e.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, List<FeedCollectionLogEntry>> collectionByDate = collectionRepository
+                .findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> e.getOccurredAt().atZone(ZONE).toLocalDate()));
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), productionByDate.getOrDefault(date, List.of()),
+                        collectionByDate.getOrDefault(date, List.of()), formulationRatioCache))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        LocalDate start = monthsList.getFirst().atDay(1);
+        LocalDate end = monthsList.getLast().atEndOfMonth();
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<Long, Double> formulationRatioCache = new HashMap<>();
+        Map<YearMonth, List<FeedProductionLogEntry>> productionByMonth = productionRepository
+                .findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, List<FeedCollectionLogEntry>> collectionByMonth = collectionRepository
+                .findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getOccurredAt().atZone(ZONE).toLocalDate())));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), productionByMonth.getOrDefault(month, List.of()),
+                        collectionByMonth.getOrDefault(month, List.of()), formulationRatioCache))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    /** Sum of qtyPerTon across every ingredient in a feed type's current formulation — cached per feed type within one report call. */
+    private double totalQtyPerTonFor(FeedType feedType, Map<Long, Double> cache) {
+        return cache.computeIfAbsent(feedType.getId(),
+                id -> formulationRepository.findAllByFeedType(feedType).stream().mapToDouble(FeedFormulationEntry::getQtyPerTon).sum());
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<FeedProductionLogEntry> production,
+                                           List<FeedCollectionLogEntry> collections, Map<Long, Double> formulationRatioCache) {
+        double produced = production.stream().mapToDouble(FeedProductionLogEntry::getQtyTons).sum();
+        // Ingredient usage is derived, not logged directly: each run's qtyTons × that feed type's
+        // current formulation ratio (kg per ton), replaying the same math runProduction() applies
+        // live — there's no per-day ingredient-usage log, only FeedIngredient's live cumulative "used".
+        double ingrUsed = production.stream()
+                .mapToDouble(e -> e.getQtyTons() * totalQtyPerTonFor(e.getFeedType(), formulationRatioCache))
+                .sum();
+        double fishCollected = collections.stream().mapToDouble(FeedCollectionLogEntry::total).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("produced", round2(produced));
+        row.put("ingrUsed", round2(ingrUsed));
+        row.put("fishCollected", round2(fishCollected));
+        return row;
     }
 }

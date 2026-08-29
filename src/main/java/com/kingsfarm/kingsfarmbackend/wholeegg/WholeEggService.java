@@ -7,6 +7,9 @@ import com.kingsfarm.kingsfarmbackend.common.PaymentMethod;
 import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.ProductionService;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
@@ -17,9 +20,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Backs WholeEggView in full: the customer directory (incl. one-time Opening
@@ -415,5 +421,64 @@ public class WholeEggService {
             return transactionRepository.findAllByOrderByOccurredAtDesc(pageable);
         }
         return transactionRepository.findAllByTxnYearOrderByOccurredAtDesc(LocalDate.now().getYear(), pageable);
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("txns", "Transactions", true),
+            new ReportColumn("crates", "Crates Sold", true),
+            new ReportColumn("revenue", "Revenue", false),
+            new ReportColumn("avg", "Avg/Txn", false)
+    );
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<LocalDate, List<WeSaleTransaction>> txnsByDate = salesInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(t -> t.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, List<WeSaleLineItemRepository.SaleLineProjection>> linesByDate = lineItemsInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(li -> li.getOccurredAt().atZone(ZONE).toLocalDate()));
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), txnsByDate.getOrDefault(date, List.of()), linesByDate.getOrDefault(date, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        Instant rangeStart = ReportPeriods.startOfDay(monthsList.getFirst().atDay(1));
+        Instant rangeEnd = ReportPeriods.startOfNextDay(monthsList.getLast().atEndOfMonth());
+        Map<YearMonth, List<WeSaleTransaction>> txnsByMonth = salesInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(t -> YearMonth.from(t.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, List<WeSaleLineItemRepository.SaleLineProjection>> linesByMonth = lineItemsInRange(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(li -> YearMonth.from(li.getOccurredAt().atZone(ZONE).toLocalDate())));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), txnsByMonth.getOrDefault(month, List.of()), linesByMonth.getOrDefault(month, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    private List<WeSaleTransaction> salesInRange(Instant start, Instant end) {
+        return transactionRepository.findAllByTypeAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(WeSaleTxnType.SALE, start, end);
+    }
+
+    private List<WeSaleLineItemRepository.SaleLineProjection> lineItemsInRange(Instant start, Instant end) {
+        return lineItemRepository.lineItemsInRange(WeSaleTxnType.SALE, start, end);
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<WeSaleTransaction> txns, List<WeSaleLineItemRepository.SaleLineProjection> lines) {
+        int txnCount = txns.size();
+        long crates = lines.stream().mapToLong(WeSaleLineItemRepository.SaleLineProjection::getQty).sum();
+        long revenue = lines.stream().mapToLong(li -> (long) li.getQty() * li.getPrice()).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("txns", txnCount);
+        row.put("crates", crates);
+        row.put("revenue", revenue);
+        row.put("avg", txnCount == 0 ? 0 : Math.round((double) revenue / txnCount));
+        return row;
     }
 }

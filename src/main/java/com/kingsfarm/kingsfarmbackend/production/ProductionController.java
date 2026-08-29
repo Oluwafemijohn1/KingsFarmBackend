@@ -2,15 +2,18 @@ package com.kingsfarm.kingsfarmbackend.production;
 
 import com.kingsfarm.kingsfarmbackend.common.CatKey;
 import com.kingsfarm.kingsfarmbackend.common.PageResponse;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.*;
 import com.kingsfarm.kingsfarmbackend.security.AuthenticatedPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /** Same role split as Bird Stock: Administrator + Production Manager can read, only Production Manager can write. */
@@ -86,5 +89,18 @@ public class ProductionController {
     @GetMapping("/day-state/history")
     public PageResponse<ProductionDayStateResponse> dayStateHistory(@PageableDefault(size = 20) Pageable pageable) {
         return PageResponse.from(service.dayStateHistory(pageable).map(service::toResponse));
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────
+
+    @GetMapping("/reports/daily")
+    public ReportTableResponse dailyReport(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return service.dailyReport(start, end);
+    }
+
+    @GetMapping("/reports/monthly")
+    public ReportTableResponse monthlyReport(@RequestParam(defaultValue = "12") int months) {
+        return service.monthlyReport(months);
     }
 }

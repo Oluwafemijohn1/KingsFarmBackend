@@ -4,9 +4,13 @@ import com.kingsfarm.kingsfarmbackend.auth.dto.*;
 import com.kingsfarm.kingsfarmbackend.common.exception.AccountLockedException;
 import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.InvalidCredentialsException;
+import com.kingsfarm.kingsfarmbackend.common.exception.OnLeaveException;
+import com.kingsfarm.kingsfarmbackend.relief.ReliefAccessService;
+import com.kingsfarm.kingsfarmbackend.relief.ReliefGrant;
 import com.kingsfarm.kingsfarmbackend.settings.SecuritySettingsService;
 import com.kingsfarm.kingsfarmbackend.user.RefreshToken;
 import com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository;
+import com.kingsfarm.kingsfarmbackend.user.Role;
 import com.kingsfarm.kingsfarmbackend.user.User;
 import com.kingsfarm.kingsfarmbackend.user.UserRepository;
 import com.kingsfarm.kingsfarmbackend.security.AppSecurityProperties;
@@ -18,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * All the login/refresh/logout/change-password logic that used to just be
@@ -26,10 +31,14 @@ import java.time.Instant;
  * for LOCKOUT_DURATION regardless of further attempts (doesn't extend on
  * every subsequent try, to avoid a trivial DoS against a known username).
  *
- * TODO(Phase 4): once relief_grants exists, a login attempt for a user
- * currently marked "on leave" (active relief grant naming them as the
- * on-leave party) should be rejected here too — deferred per BACKEND_PLAN.md
- * §5.10 since that table doesn't exist yet.
+ * Relief Access (Phase 4): a login attempt for a user currently marked "on
+ * leave" (an active {@link ReliefGrant} naming them as the on-leave party)
+ * is rejected — checked only after the password has already matched, same
+ * order as the frontend's handleLogin, so a wrong password never reveals
+ * on-leave status. Every access token issued here (and by {@link #refresh})
+ * also bakes in any roles this user currently covers as a relieving officer
+ * — see ReliefGrant/AuthenticatedPrincipal's javadoc for the staleness
+ * tradeoff that accepts.
  */
 @Service
 public class AuthService {
@@ -43,6 +52,7 @@ public class AuthService {
     private final SecuritySettingsService securitySettingsService;
     private final AppSecurityProperties securityProperties;
     private final SystemLogService systemLogService;
+    private final ReliefAccessService reliefAccessService;
 
     public AuthService(UserRepository userRepository,
                         RefreshTokenRepository refreshTokenRepository,
@@ -50,7 +60,8 @@ public class AuthService {
                         JwtService jwtService,
                         SecuritySettingsService securitySettingsService,
                         AppSecurityProperties securityProperties,
-                        SystemLogService systemLogService) {
+                        SystemLogService systemLogService,
+                        ReliefAccessService reliefAccessService) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -58,6 +69,7 @@ public class AuthService {
         this.securitySettingsService = securitySettingsService;
         this.securityProperties = securityProperties;
         this.systemLogService = systemLogService;
+        this.reliefAccessService = reliefAccessService;
     }
 
     @Transactional
@@ -89,19 +101,29 @@ public class AuthService {
             throw new InvalidCredentialsException("Incorrect username or password.");
         }
 
+        // Checked only after the password is confirmed correct — same order as the frontend's
+        // handleLogin, so a wrong-password attempt never reveals whether this account is on leave.
+        ReliefGrant activeLeave = reliefAccessService.activeLeaveFor(user);
+        if (activeLeave != null) {
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Blocked (on leave)", ipAddress);
+            throw new OnLeaveException("You're currently on leave — " + activeLeave.getGranteeUser().getFullName()
+                    + " has relief access to your module while you're away. Contact your administrator if this isn't right.");
+        }
+
         user.setFailedLoginAttempts(0);
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
         systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Success", ipAddress);
 
-        String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword());
+        List<Role> extraRoles = reliefAccessService.extraRolesFor(user);
+        String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword(), extraRoles);
         String refreshToken = issueRefreshToken(user);
 
         return new LoginResponse(
                 accessToken, refreshToken,
                 user.getId(), user.getUsername(), user.getFullName(),
                 user.getRole(), user.getRole().label(),
-                user.isMustChangePassword()
+                user.isMustChangePassword(), extraRoles
         );
     }
 
@@ -129,6 +151,13 @@ public class AuthService {
         if (!user.isActive()) {
             throw new InvalidCredentialsException("Invalid or expired refresh token.");
         }
+        // A grant taking effect mid-session should actually cut the on-leave user off, not just
+        // block their next fresh login — otherwise Relief Access wouldn't restrict anyone already
+        // signed in. Their session ends the next time this refresh token would've renewed them
+        // (at most one access-token TTL from now).
+        if (reliefAccessService.activeLeaveFor(user) != null) {
+            throw new OnLeaveException("You're currently on leave. Contact your administrator if this isn't right.");
+        }
 
         // Rotate: revoke the used token, issue a brand new one — a stolen refresh
         // token that gets reused after rotation signals compromise, but a single
@@ -136,7 +165,8 @@ public class AuthService {
         existing.setRevokedAt(Instant.now());
         refreshTokenRepository.save(existing);
 
-        String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword());
+        List<Role> extraRoles = reliefAccessService.extraRolesFor(user);
+        String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword(), extraRoles);
         String newRefreshToken = issueRefreshToken(user);
         return new TokenResponse(accessToken, newRefreshToken);
     }

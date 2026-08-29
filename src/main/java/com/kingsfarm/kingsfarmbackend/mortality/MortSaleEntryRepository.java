@@ -6,6 +6,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+import java.util.List;
+
 public interface MortSaleEntryRepository extends JpaRepository<MortSaleEntry, Long> {
     Page<MortSaleEntry> findAllByOrderByOccurredAtDesc(Pageable pageable);
 
@@ -14,4 +17,7 @@ public interface MortSaleEntryRepository extends JpaRepository<MortSaleEntry, Lo
 
     @Query("select coalesce(sum(e.qty * e.price), 0) from MortSaleEntry e")
     long sumRevenue();
+
+    /** Every sale in a half-open instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
+    List<MortSaleEntry> findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(Instant start, Instant end);
 }

@@ -8,6 +8,9 @@ import com.kingsfarm.kingsfarmbackend.common.PaymentMethod;
 import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.mortality.dto.*;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
@@ -18,9 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Backs MortalityView in full — five dead-bird categories (Good, Dry, Runt,
@@ -347,5 +354,82 @@ public class MortalityService {
 
     public boolean isEditableInstant(Instant occurredAt) {
         return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("total", "Total Mortality", true),
+            new ReportColumn("sales", "Sales (qty)", true),
+            new ReportColumn("salesRevenue", "Sales Revenue", false),
+            new ReportColumn("gifts", "Gifted", true),
+            new ReportColumn("catfish", "Green → Catfish", true),
+            new ReportColumn("disposal", "PM/Reject → Disposal", true)
+    );
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<LocalDate, List<MortPenEntry>> penByDate = penEntryRepository.findAllByEntryDateBetween(start, end).stream()
+                .collect(Collectors.groupingBy(MortPenEntry::getEntryDate));
+        Map<LocalDate, List<MortSaleEntry>> salesByDate = saleRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> e.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, List<MortGiftLogEntry>> giftsByDate = giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> e.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, MortCatfishDisposalState> disposalByDate = catfishDisposalRepository.findAllByEntryDateBetween(start, end).stream()
+                .collect(Collectors.toMap(MortCatfishDisposalState::getEntryDate, s -> s));
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), penByDate.getOrDefault(date, List.of()),
+                        salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), disposalByDate.get(date)))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        LocalDate start = monthsList.getFirst().atDay(1);
+        LocalDate end = monthsList.getLast().atEndOfMonth();
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        Map<YearMonth, List<MortPenEntry>> penByMonth = penEntryRepository.findAllByEntryDateBetween(start, end).stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getEntryDate())));
+        Map<YearMonth, List<MortSaleEntry>> salesByMonth = saleRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, List<MortGiftLogEntry>> giftsByMonth = giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(rangeStart, rangeEnd).stream()
+                .collect(Collectors.groupingBy(e -> YearMonth.from(e.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, List<MortCatfishDisposalState>> disposalByMonth = catfishDisposalRepository.findAllByEntryDateBetween(start, end).stream()
+                .collect(Collectors.groupingBy(s -> YearMonth.from(s.getEntryDate())));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), penByMonth.getOrDefault(month, List.of()),
+                        salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()),
+                        sumDisposalStates(disposalByMonth.getOrDefault(month, List.of()))))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    /** Monthly rows fold several days' MortCatfishDisposalState rows into one summed pseudo-state. */
+    private MortCatfishDisposalState sumDisposalStates(List<MortCatfishDisposalState> states) {
+        int catfish = states.stream().mapToInt(MortCatfishDisposalState::getCatfishQty).sum();
+        int disposal = states.stream().mapToInt(MortCatfishDisposalState::getDisposalQty).sum();
+        return MortCatfishDisposalState.builder().catfishQty(catfish).disposalQty(disposal).build();
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<MortPenEntry> penEntries, List<MortSaleEntry> sales,
+                                           List<MortGiftLogEntry> gifts, MortCatfishDisposalState disposal) {
+        int total = penEntries.stream().mapToInt(MortPenEntry::total).sum();
+        int salesQty = sales.stream().mapToInt(MortSaleEntry::getQty).sum();
+        long salesRevenue = sales.stream().mapToLong(e -> (long) e.getQty() * e.getPrice()).sum();
+        int giftQty = gifts.stream().mapToInt(g -> g.getGood() + g.getDry() + g.getRunt()).sum();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("total", total);
+        row.put("sales", salesQty);
+        row.put("salesRevenue", salesRevenue);
+        row.put("gifts", giftQty);
+        row.put("catfish", disposal == null ? 0 : disposal.getCatfishQty());
+        row.put("disposal", disposal == null ? 0 : disposal.getDisposalQty());
+        return row;
     }
 }

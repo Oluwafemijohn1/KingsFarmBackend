@@ -8,6 +8,9 @@ import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ForbiddenException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportColumn;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
 import org.springframework.data.domain.Page;
@@ -16,7 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Backs BirdStockView. A pen's row for "today" is found-or-created on read
@@ -174,5 +181,62 @@ public class BirdStockService {
     @Transactional(readOnly = true)
     public int totalClosingToday() {
         return getTodayRecords().stream().mapToInt(BirdPenRecord::closing).sum();
+    }
+
+    /** Real closing total for one pen on one date — Production's Reports %-of-birds column reuses this instead of re-deriving. */
+    @Transactional(readOnly = true)
+    public int closingOn(Pen pen, LocalDate date) {
+        return recordRepository.findByPenAndEntryDate(pen, date).map(BirdPenRecord::closing).orElse(0);
+    }
+
+    /** Farm-wide closing total across every pen on one date — Production's Reports %-of-birds column, farm level. */
+    @Transactional(readOnly = true)
+    public int closingAcrossPensOn(LocalDate date) {
+        return recordRepository.findAllByEntryDate(date).stream().mapToInt(BirdPenRecord::closing).sum();
+    }
+
+    // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────
+
+    private static final List<ReportColumn> REPORT_COLUMNS = List.of(
+            new ReportColumn("opening", "Opening", true),
+            new ReportColumn("mortality", "Mortality", true),
+            new ReportColumn("sales", "Sales", true),
+            new ReportColumn("restock", "Restock", true),
+            new ReportColumn("closing", "Closing", true)
+    );
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
+        List<BirdPenRecord> records = recordRepository.findAllByEntryDateBetween(start, end);
+        Map<LocalDate, List<BirdPenRecord>> byDate = records.stream().collect(Collectors.groupingBy(BirdPenRecord::getEntryDate));
+        List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTableResponse monthlyReport(int months) {
+        List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
+        LocalDate start = monthsList.getFirst().atDay(1);
+        LocalDate end = monthsList.getLast().atEndOfMonth();
+        List<BirdPenRecord> records = recordRepository.findAllByEntryDateBetween(start, end);
+        Map<YearMonth, List<BirdPenRecord>> byMonth = records.stream()
+                .collect(Collectors.groupingBy(r -> YearMonth.from(r.getEntryDate())));
+        List<Map<String, Object>> rows = monthsList.stream()
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of())))
+                .toList();
+        return new ReportTableResponse(REPORT_COLUMNS, rows);
+    }
+
+    private Map<String, Object> reportRow(String periodLabel, List<BirdPenRecord> records) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("period", periodLabel);
+        row.put("opening", records.stream().mapToInt(BirdPenRecord::getOpening).sum());
+        row.put("mortality", records.stream().mapToInt(BirdPenRecord::getMortality).sum());
+        row.put("sales", records.stream().mapToInt(BirdPenRecord::getBirdSales).sum());
+        row.put("restock", records.stream().mapToInt(BirdPenRecord::getRestocking).sum());
+        row.put("closing", records.stream().mapToInt(BirdPenRecord::closing).sum());
+        return row;
     }
 }
