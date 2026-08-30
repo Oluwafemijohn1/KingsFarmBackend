@@ -38,4 +38,21 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
         int getQty();
         long getPrice();
     }
+
+    /**
+     * Crates/revenue totals for one customer's SALE-type transactions, feeding
+     * the Customers directory table (WholeEggView's customerStats). txnYear
+     * null means "all time" (Administrator); a manager passes the current
+     * year, matching the same restriction customerHistory/allTransactions
+     * already apply.
+     */
+    @Query("select coalesce(sum(li.qty), 0) from WeSaleLineItem li " +
+            "where li.transaction.customer = :customer and li.transaction.type = :type " +
+            "and (:txnYear is null or li.transaction.txnYear = :txnYear)")
+    long sumQtyForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
+
+    @Query("select coalesce(sum(li.qty * li.price), 0) from WeSaleLineItem li " +
+            "where li.transaction.customer = :customer and li.transaction.type = :type " +
+            "and (:txnYear is null or li.transaction.txnYear = :txnYear)")
+    long sumRevenueForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
 }

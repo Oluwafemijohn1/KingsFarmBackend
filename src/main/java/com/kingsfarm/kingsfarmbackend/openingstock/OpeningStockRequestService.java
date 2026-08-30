@@ -53,6 +53,11 @@ public class OpeningStockRequestService {
                 : requestRepository.findAllByOrderByRequestedAtDesc(pageable);
     }
 
+    @Transactional(readOnly = true)
+    public boolean hasPendingRequestByUser(com.kingsfarm.kingsfarmbackend.common.Mod module, String scope, Long userId) {
+        return requestRepository.existsByModuleAndScopeAndRequestedBy_IdAndStatus(module, scope, userId, RequestStatus.PENDING);
+    }
+
     @Audited(module = com.kingsfarm.kingsfarmbackend.common.Mod.ADMIN, action = "Opening Stock Unlock Resolved", type = LogType.AUDIT,
             detail = "'Request #' + #requestId + ' -> ' + #decision")
     @Transactional

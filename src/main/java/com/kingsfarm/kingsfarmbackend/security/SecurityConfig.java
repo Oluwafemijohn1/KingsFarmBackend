@@ -46,6 +46,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // Deliberately still disabled now that auth moved to httpOnly cookies
+                // (BACKEND_PLAN.md §11 decision #2) — CSRF protection here comes from
+                // both cookies being SameSite=Strict (see AuthCookies' javadoc) instead
+                // of Spring Security's token-based CSRF machinery, which would need the
+                // frontend to fetch and thread a CSRF token through every mutating call
+                // for comparatively little benefit on an internal-only tool.
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -80,6 +86,10 @@ public class SecurityConfig {
     private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         // Vite dev server defaults; tighten/parameterize before deploying anywhere real.
+        // Explicit origins (never "*") are required here, not just preferred — a
+        // credentialed request (allowCredentials below, needed so the browser will
+        // actually send the httpOnly auth cookies) is rejected by every browser if the
+        // response's Access-Control-Allow-Origin is a wildcard.
         configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-API-Key"));

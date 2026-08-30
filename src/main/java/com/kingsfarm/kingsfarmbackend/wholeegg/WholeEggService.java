@@ -213,21 +213,21 @@ public class WholeEggService {
     }
 
     @Transactional(readOnly = true)
-    public Page<CustomerResponse> listCustomers(Pageable pageable) {
+    public Page<CustomerResponse> listCustomers(Pageable pageable, boolean isAdmin) {
         return customerRepository.findAllByOrderByCreatedAtDesc(pageable)
-                .map(c -> CustomerResponse.from(c, customerBalance(c)));
+                .map(c -> toCustomerResponse(c, isAdmin));
     }
 
     @Transactional(readOnly = true)
-    public List<CustomerResponse> searchCustomers(String query) {
+    public List<CustomerResponse> searchCustomers(String query, boolean isAdmin) {
         return customerRepository.search(query, PageRequest.of(0, 20)).stream()
-                .map(c -> CustomerResponse.from(c, customerBalance(c)))
+                .map(c -> toCustomerResponse(c, isAdmin))
                 .toList();
     }
 
     /** Most recently active customers first, then most-recently-created customers with no sale yet — matches WholeEggView's recentCustomers picker shortlist. */
     @Transactional(readOnly = true)
-    public List<CustomerResponse> recentCustomers(int limit) {
+    public List<CustomerResponse> recentCustomers(int limit, boolean isAdmin) {
         List<WeSaleTransactionRepository.CustomerActivityProjection> ranking =
                 transactionRepository.customerActivityRanking(PageRequest.of(0, limit));
 
@@ -241,7 +241,7 @@ public class WholeEggService {
                 ordered.putIfAbsent(c.getId(), c);
             }
         }
-        return ordered.values().stream().map(c -> CustomerResponse.from(c, customerBalance(c))).toList();
+        return ordered.values().stream().map(c -> toCustomerResponse(c, isAdmin)).toList();
     }
 
     /** Positive = customer owes; negative = customer has an advance. Derived from the customer's single most recent transaction (a running balance, never summed). */
@@ -250,6 +250,32 @@ public class WholeEggService {
         return transactionRepository.findFirstByCustomerOrderByOccurredAtDesc(customer)
                 .map(t -> t.getCredit() - t.getAdvance())
                 .orElse(0L);
+    }
+
+    /**
+     * Builds one Customers-directory row, including the visitCount/
+     * totalCrates/totalRevenue/lastPurchaseAt stats CustomerResponse gained
+     * for the Phase 5 frontend swap. isAdmin=false restricts every one of
+     * these (not just balance, which is always all-time) to the current
+     * year — same rule as customerHistory/allTransactions. One extra handful
+     * of bounded queries per customer, same N+1-per-page shape the existing
+     * customerBalance() call already had before this was added — acceptable
+     * at directory page sizes (20 rows), not worth a batch-query rewrite yet.
+     */
+    @Transactional(readOnly = true)
+    public CustomerResponse toCustomerResponse(Customer customer, boolean isAdmin) {
+        long balance = customerBalance(customer);
+        Integer year = isAdmin ? null : LocalDate.now().getYear();
+        long visits = isAdmin
+                ? transactionRepository.countByCustomer(customer)
+                : transactionRepository.countByCustomerAndTxnYear(customer, year);
+        long crates = lineItemRepository.sumQtyForCustomer(customer, WeSaleTxnType.SALE, year);
+        long revenue = lineItemRepository.sumRevenueForCustomer(customer, WeSaleTxnType.SALE, year);
+        Instant lastPurchase = (isAdmin
+                ? transactionRepository.findFirstByCustomerOrderByOccurredAtDesc(customer)
+                : transactionRepository.findFirstByCustomerAndTxnYearOrderByOccurredAtDesc(customer, year))
+                .map(WeSaleTransaction::getOccurredAt).orElse(null);
+        return CustomerResponse.from(customer, balance, visits, crates, revenue, lastPurchase);
     }
 
     private long priorBalanceFor(WeSaleTransaction txn) {
@@ -421,6 +447,13 @@ public class WholeEggService {
             return transactionRepository.findAllByOrderByOccurredAtDesc(pageable);
         }
         return transactionRepository.findAllByTxnYearOrderByOccurredAtDesc(LocalDate.now().getYear(), pageable);
+    }
+
+    /** Farm-wide, all-time, not year-restricted — a customer's outstanding balance doesn't reset each year just because a manager's browsable history does. */
+    @Transactional(readOnly = true)
+    public OutstandingBalanceResponse outstandingTotals() {
+        WeSaleTransactionRepository.OutstandingTotals totals = transactionRepository.outstandingTotals();
+        return new OutstandingBalanceResponse(totals.getTotalCredit(), totals.getTotalAdvance());
     }
 
     // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────

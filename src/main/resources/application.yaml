@@ -50,6 +50,12 @@ app:
       secret: ${JWT_SECRET:local-dev-only-jwt-signing-secret-replace-me-before-deploying-anywhere-real}
       access-token-minutes: ${JWT_ACCESS_MINUTES:30}
       refresh-token-days: ${JWT_REFRESH_DAYS:7}
+    # Both auth cookies (BACKEND_PLAN.md §11 decision #2) are always httpOnly +
+    # SameSite=Strict; Secure additionally requires HTTPS. Defaults to true —
+    # Chrome/Edge/recent Firefox all treat http://localhost as a secure-context
+    # exception, so this works out of the box in local dev too. Only flip this
+    # to false if you hit a browser that doesn't grant that localhost exception.
+    cookie-secure: ${AUTH_COOKIE_SECURE:true}
   # Seeds exactly one Administrator account on first startup (see
   # DataSeeder) so there's a way to log in at all before any other user
   # exists — every account after this one is created by that Administrator

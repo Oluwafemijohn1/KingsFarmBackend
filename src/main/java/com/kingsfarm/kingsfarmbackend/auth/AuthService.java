@@ -138,8 +138,8 @@ public class AuthService {
     }
 
     @Transactional
-    public TokenResponse refresh(RefreshRequest request) {
-        String hash = jwtService.hashRefreshToken(request.refreshToken());
+    public TokenResponse refresh(String rawRefreshToken) {
+        String hash = jwtService.hashRefreshToken(rawRefreshToken);
         RefreshToken existing = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired refresh token."));
 
@@ -172,14 +172,39 @@ public class AuthService {
     }
 
     @Transactional
-    public void logout(LogoutRequest request, String ipAddress) {
-        String hash = jwtService.hashRefreshToken(request.refreshToken());
+    public void logout(String rawRefreshToken, String ipAddress) {
+        String hash = jwtService.hashRefreshToken(rawRefreshToken);
         refreshTokenRepository.findByTokenHash(hash).ifPresent(token -> {
             token.setRevokedAt(Instant.now());
             refreshTokenRepository.save(token);
             User user = token.getUser();
             systemLogService.logAccess(user.getId(), user.getUsername(), "Logout", "Success", ipAddress);
         });
+    }
+
+    /**
+     * Backs {@code GET /auth/me} — the frontend's session-bootstrap check on
+     * every page load, since an httpOnly cookie survives a reload but React
+     * state doesn't (BACKEND_PLAN.md §9). Deliberately re-reads the user
+     * (fresh fullName/role in case an admin changed either mid-session) and
+     * recomputes extraRoles fresh (fresher than what's baked into the current
+     * access token — that JWT claim is only refreshed at login/refresh time,
+     * same tradeoff as everywhere else, but there's no reason /me itself
+     * shouldn't show the truest picture available for display purposes).
+     * accessToken/refreshToken are meaningless here (no new tokens are
+     * issued) — left null, which is invisible anyway since LoginResponse
+     * excludes them from serialization.
+     */
+    @Transactional(readOnly = true)
+    public LoginResponse currentSession(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new InvalidCredentialsException("Session is no longer valid."));
+        if (!user.isActive()) {
+            throw new InvalidCredentialsException("Session is no longer valid.");
+        }
+        List<Role> extraRoles = reliefAccessService.extraRolesFor(user);
+        return new LoginResponse(null, null, user.getId(), user.getUsername(), user.getFullName(),
+                user.getRole(), user.getRole().label(), user.isMustChangePassword(), extraRoles);
     }
 
     @Transactional

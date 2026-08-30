@@ -33,8 +33,10 @@ public class OpeningStockController {
     }
 
     @GetMapping("/lock")
-    public LockStatusResponse getLockStatus(@RequestParam Mod module, @RequestParam String scope) {
-        return new LockStatusResponse(lockService.isLocked(module, scope));
+    public LockStatusResponse getLockStatus(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                             @RequestParam Mod module, @RequestParam String scope) {
+        boolean pendingByMe = requestService.hasPendingRequestByUser(module, scope, principal.userId());
+        return new LockStatusResponse(lockService.isLocked(module, scope), pendingByMe);
     }
 
     @PostMapping("/requests")

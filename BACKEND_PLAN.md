@@ -652,8 +652,452 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     the whole range, grouped in Java) rather than one query per day, after an
     independent review pass caught the original per-day-query version as a real,
     if minor, N+1 pattern.
-- **Phase 5 — Frontend integration**: swap `FarmProvider`/`App.tsx` over to the API,
-  module by module, verifying each screen still behaves exactly as it does today.
+- **Phase 5 — Frontend integration** (in progress): swap `FarmProvider`/`App.tsx` over
+  to the API, module by module, verifying each screen still behaves exactly as it does
+  today.
+  - Auth now runs on httpOnly cookies rather than JSON-body tokens (§11 decision #2).
+    New `AuthCookies` (`auth` package) builds/reads two cookies: `kf_access_token`
+    (path `/`, httpOnly + Secure + SameSite=Strict, TTL = the existing access-token
+    minutes) and `kf_refresh_token` (path `/api/v1/auth` only — no other endpoint ever
+    needs it). `AuthController.login` sets both from `AuthService.login`'s result;
+    `/refresh` and `/logout` take no request body anymore — they read the refresh
+    cookie straight off the request and return `204 No Content` (their old
+    `RefreshRequest`/`LogoutRequest` body DTOs are deleted). `LoginResponse` keeps
+    `accessToken`/`refreshToken` as record components (so the controller can still read
+    them to set cookies) but excludes both from the JSON body via
+    `@JsonIgnoreProperties` — the whole point of httpOnly is that JS never sees the raw
+    token, including in the login response itself. `JwtAuthenticationFilter` now reads
+    the access token from the cookie first, falling back to `Authorization: Bearer` for
+    non-browser clients (Swagger/curl/tests) — the fallback is a separate code path an
+    XSS payload in the real frontend has no way to reach, so it doesn't weaken the
+    cookie's protection. CSRF protection is `SameSite=Strict` on both cookies rather
+    than Spring Security's token-based CSRF machinery (left disabled, same as before) —
+    judged sufficient for an internal-only tool rather than adding a CSRF-token fetch
+    to every mutating frontend call. New `app.security.cookie-secure` property
+    (default `true`) controls the `Secure` attribute; true works out of the box in
+    local dev because Chrome/Edge/recent Firefox treat `http://localhost` as a
+    secure-context exception.
+  - New `GET /api/v1/auth/me` (authenticated, no request body) — a gap discovered while
+    designing the frontend's auth flow, not something the original sketch anticipated:
+    an httpOnly cookie survives a page reload but React state doesn't, so the frontend
+    needs a way to ask "is there still a valid session?" on every app load. Reuses
+    `LoginResponse`'s shape (tokens null/ignored, same as everywhere else) and
+    recomputes `extraRoles` fresh rather than trusting the current access token's own
+    (possibly stale-until-next-refresh) claim.
+  - `Role` (the `user` package enum) gained `@JsonValue`/`@JsonCreator` — another gap
+    caught while designing the frontend's login flow: without it, `role`/`extraRoles`
+    were serializing as the raw Java constant name (`"ADMINISTRATOR"`), not the label
+    string (`"Administrator"`) the frontend's own `Role` type union expects, and there
+    was no `extraRoleLabels` field to fall back on the way `roleLabel` covers `role`
+    alone. Now matches `Mod`'s existing wire-format precedent exactly — the frontend
+    consumes `role`/`extraRoles` directly with no translation layer needed. Several
+    DTOs built before this still carry a separate `roleLabel` alongside `role`
+    (`CreateUserResponse`, `LoginResponse`, etc.) — now redundant, left alone rather
+    than touched as a drive-by refactor; worth a small cleanup pass in Phase 6.
+  - `OpeningStockCell` (`components.tsx`) — the shared cross-module Opening-Stock
+    widget every module's view renders — is now a controlled component: it accepts
+    optional `locked`/`pendingRequest`/`onRequestSubmit`/`onLock`/`onBlur` props and,
+    when a caller supplies them, uses those instead of the original
+    `useFarm()`-backed behavior. Left undefined, it behaves exactly as before, so
+    modules not yet converted (Production, Whole Egg, Crack Egg, Mortality, Feed
+    Mill) needed zero changes. This is how modules are migrated one at a time without
+    a big-bang rewrite of every `OpeningStockCell` call site at once.
+  - `GET /api/v1/opening-stock/lock` gained a second response field —
+    `LockStatusResponse.pendingRequestByMe` — because `GET /opening-stock/requests`
+    is Administrator-only, so a manager had no way to find out whether their own
+    unlock request for a field was still pending, including after a page reload.
+    Backed by a new `existsByModuleAndScopeAndRequestedBy_IdAndStatus` repository
+    method and `OpeningStockRequestService.hasPendingRequestByUser`. Scoped to "by
+    me" specifically, not "any pending request for this scope."
+  - Bird Stock (`BirdStockView.tsx`) is the first module fully swapped onto the real
+    API: `GET /records/today` on load (plus a per-pen `GET /opening-stock/lock` to
+    seed `pendingRequestByMe`), `PATCH /records/{penId}` on field blur,
+    `POST /records/{penId}/lock-opening` for the manager's "Done — Lock" action,
+    `POST /pens` / `DELETE /pens/{id}` for add/remove. The old "Save Record" button
+    and save/unlock toggle are gone — the backend's per-record `editable` flag (true
+    only for today's row) already collapses that into one rule (see
+    `BirdStockService`'s javadoc), so every field now auto-saves on blur instead.
+    `NumInput` gained an optional `onBlur` prop for this (unused by not-yet-converted
+    modules). One known transitional gap: `ProductionView`/`WholeEggView` still read
+    bird totals from the in-memory `FarmProvider` store's `pens`, which Bird Stock no
+    longer writes to — their cross-module bird-closing figures will be stale until
+    Production is converted (next, Phase 5 task list) to read the real
+    `GET /bird-stock/records/today` total instead.
+  - Production (`ProductionView.tsx`) is the second module converted. Its backend
+    already composed Whole Egg's and Crack Egg's live figures (§6's bidirectional
+    `@Lazy`-injected cross-module reads in `ProductionService`) before this — the
+    frontend swap just wires the UI to what was already there. `GET
+    /pen-entries/today` + `GET /day-state/today` load on mount; per-pen production
+    cells `PATCH /pen-entries/{penId}` (one category at a time — matches the
+    frontend's per-cell `onChange`); category Opening Stock cells and the six Crack
+    Egg tab fields both flow through `PATCH /day-state/cat-opening` and `PATCH
+    /day-state/crack-fields` respectively, on blur. Same autosave-on-blur model as
+    Bird Stock, same reason (no more save/unlock toggle — `editable` is the only
+    rule). Two more known transitional gaps, in the same spirit as Bird Stock's:
+    (1) `WholeEggView`/`CrackEggView` still read Production's numbers from the
+    frozen in-memory store's `penProd`/`catOpening`/etc. (Production no longer
+    writes there), so their auto-received "Egg Production"/"Crack Received"
+    figures are stale until they're converted; (2) Production's own "auto"
+    columns (Crack Use, Total Sales, Gift from Whole Egg; Good Crack Gift/Sales
+    from Crack Egg) will read zero from the real backend until those two modules
+    are converted and start writing real transactions there — the wiring is
+    already correct, there's just no real data behind it yet.
+  - Whole Egg (`WholeEggView.tsx`, ~2,200 lines — the largest module in this
+    migration) is the third converted. Stock Overview's Opening Stock/Price cells
+    autosave on blur exactly like Bird Stock/Production; Sales Crack and Gift keep
+    their original explicit "Save & Transfer" buttons — those are real commit
+    actions (`PUT /stock/sales-crack` / `PUT /stock/gift`, whole-array-replace), not
+    per-field autosave, so a button stays appropriate there. New Sale, the
+    Customers directory, and a customer's Purchase History are now all backed by
+    real paginated endpoints instead of the in-memory store's flat arrays.
+    Three small, justified backend extensions came out of building the real UI
+    (none were scope creep — each closes a gap the existing API genuinely didn't
+    cover):
+    (1) `LockStatusResponse.pendingRequestByMe`-style gap didn't recur here (that
+    was Bird Stock's), but `CustomerResponse` gained `visitCount`/`totalCrates`/
+    `totalRevenue`/`lastPurchaseAt`, computed in `WholeEggService.toCustomerResponse`
+    via two new `WeSaleLineItemRepository` aggregate queries and two new
+    `WeSaleTransactionRepository` count/latest-txn queries — needed once the
+    Customers directory became a real server-paginated table rather than something
+    that could recompute these client-side over an in-memory array. Follows the
+    same year-restriction rule already established for `customerHistory`/
+    `allTransactions`: `isAdmin` sees all-time, a manager sees the current year
+    only.
+    (2) New `GET /customers/outstanding-summary` (`OutstandingBalanceResponse`,
+    a `WeSaleTransactionRepository` correlated-subquery aggregate over each
+    customer's single latest transaction) — the Sales Transactions table's footer
+    used to sum farm-wide outstanding credit/advance across every loaded row,
+    which real pagination makes impossible client-side; this one endpoint replaces
+    that math exactly. Per-category qty/revenue footer totals were simplified to
+    "this page" only — not worth a further aggregate endpoint.
+    (3) `listCustomers`/`searchCustomers`/`recentCustomers` all gained an
+    `isAdmin` parameter (threaded from `AuthenticatedPrincipal` in the controller)
+    for the same reason as (1).
+    Two things deliberately left alone: `WeSaleTxnType` has no `@JsonValue`
+    (unlike `Mod`/`Role`/`CatKey`/`PaymentMethod`), so it serializes as the raw
+    Java constant name (`"SALE"`/`"PAYMENT"`/`"OPENING"`); the frontend was
+    written to consume that wire format directly rather than treating it as a bug
+    to fix, since nothing else depends on the label form. And gift `recipient`/
+    `authorizer` fields still have no backend column — confirmed these were never
+    actually persisted in the pre-migration app either (pure local UI state), so
+    keeping them as local-only React state in the rewrite is not a regression.
+    `components.tsx`'s `RowEditButton` (date-stamp-prefix check, `isEditableToday`)
+    turned out not to fit here — `WeSaleTransactionResponse` already carries a
+    live `editable` boolean computed server-side (`WholeEggService.isEditable`,
+    same-day-only), so `WholeEggView.tsx` has its own small local
+    `EditOrLockedButton` driven directly off that flag instead of forcing a real
+    boolean through a component built for a date-string prefix match. The edit
+    affordance is also intentionally restricted to `SALE`-type transactions only
+    — `updateTransaction` technically allows editing a `PAYMENT` row's method/
+    amount too, but that would need its own non-items edit form (closer to
+    `RecordPaymentModal` than the sales-items grid `EditSaleTxnModal` provides);
+    left as a known gap rather than building a second edit modal for a rare case.
+    One known transitional gap, same pattern as Bird Stock/Production: Crack Egg's
+    "auto-received" figures (Good Crack Gift/Sales feeding back into Production)
+    will read stale/zero until Crack Egg (next, Phase 5 task list) is also
+    converted and starts writing real transactions.
+  - Crack Egg (`CrackEggView.tsx`) is the fourth converted, and needed zero
+    backend changes — `CrackEggService`/`CrackEggController` were already
+    complete from Phase 3, including reading Good/Rough Crack's Production &
+    Received figures live off `ProductionService.getTodayDayState()` and
+    exposing a per-record `editable` boolean on both `GcSaleResponse` and
+    `GiftLogEntryResponse`, the same pattern Whole Egg's `WeSaleTransactionResponse`
+    established. The frontend swap was purely wiring: `GET /stock` on load
+    (Good + Rough Crack in one call) plus the two opening-stock lock checks;
+    Good Crack Opening Stock and Selling Price autosave on blur through
+    `OpeningStockCell`/`NumInput` exactly like Whole Egg's Stock Overview. Good
+    Crack Sales and the Gift log both kept their original inline-row-edit
+    table UI (not a modal, unlike Whole Egg) — `PATCH /sales/{id}` and
+    `PATCH /gift/log/{id}` only ever touch the fields `UpdateGcSaleRequest`/
+    `UpdateGiftLogEntryRequest` expose (customer/state/qty/price/credit/advance
+    for a sale; qty/recipient/authorizer for a gift entry — payment method,
+    bank and amounts stay fixed once a sale is made, matching the original
+    `GcSaleDraft` type exactly). Both tables reuse the same local
+    `EditOrLockedButton` pattern Whole Egg introduced (a live `editable`
+    boolean in place of `RowEditButton`'s date-stamp-prefix check).
+    Credit/Advance here are still hand-typed by staff on the sale form, not
+    auto-derived — `CreateGcSaleRequest`/`GcSaleTransaction` never computed
+    them, so this is a real behavioral difference from Whole Egg's sales
+    (which do auto-derive credit/advance from amount owed vs. paid) that was
+    already present before this migration and is preserved as-is, not
+    "fixed" to match Whole Egg.
+    The Gift tab's three fields (qty/recipient/authorizer) now autosave to
+    `CrackEggState` on blur (`PATCH /gift/qty`, `/gift/recipient`,
+    `/gift/authorizer`), and clicking "Save Gift" flushes all three first,
+    then calls `POST /gift/log` — which snapshots whatever `CrackEggState`
+    currently holds into a permanent log row (`saveGiftSnapshot()` reads live
+    state rather than taking new values in its request body), so the
+    frontend has to guarantee the autosaves have landed before asking for the
+    snapshot rather than relying on eventual consistency. Feed Mill Usage
+    keeps its original explicit "Save" button (not autosave) because it's
+    hard-validated server-side against available Rough Crack stock
+    (`setRcFeedMill` throws `BadRequestException` over the limit) — a commit
+    action, not a per-keystroke save, same reasoning as Whole Egg's Sales
+    Crack & Gift buttons.
+    No known transitional gaps remain from this conversion — Crack Egg was
+    the last module reading stale in-memory data from any of Bird Stock,
+    Production, or Whole Egg (all three are now live), and nothing downstream
+    reads from Crack Egg's own old in-memory store except Feed Mill (next,
+    Phase 5 task list), which will pick up real Feed Mill Usage figures once
+    it's converted.
+  - Mortality (`MortalityView.tsx`) is the fifth converted, and — like Crack
+    Egg — needed zero backend changes; `MortalityService`/`MortalityController`
+    were already complete from Phase 3. Mortality is the one module with no
+    cross-module feed in or out at all (BACKEND_PLAN.md §6 never lists it),
+    so this conversion carries no transitional staleness in either
+    direction. Two real UX changes came out of following the backend's
+    actual data model rather than the original mock's shape:
+    (1) Pen Mortality Entry (`GET /pens/today` + `PATCH /pens/{penId}`)
+    dropped its single-day `SaveLockBar`/manual "Save Mortality Record"
+    button in favor of per-cell autosave-on-blur, matching Bird Stock and
+    Production — the backend already exposes a live `editable` boolean per
+    pen-per-day row (`MortalityService.isEditable`), so there's nothing left
+    for a manual lock toggle to do that the flag doesn't already cover.
+    (2) Catfish & Disposal (`GET /catfish-disposal/today` +
+    `PATCH /catfish-disposal`) converted the same way — one state object per
+    day with its own `editable` flag, autosaved on blur rather than behind
+    an explicit Save/Edit toggle. Gift is the one exception that correctly
+    stayed a single explicit "Save Gifts" button: `SaveGiftRequest` is one
+    atomic backend call that commits Good/Dry/Runt gift totals and appends a
+    permanent log row together, with no per-field autosave endpoint the way
+    Crack Egg's gift fields have — so the original all-at-once UX was
+    already the right shape for this backend and needed no redesign, just
+    real wiring (`POST /gift`, `PATCH /gift/{id}` for the log's inline edit,
+    `GET /gift` paginated).
+    Sales Transactions (`GcSalesTransactionsTable`-style inline-row-edit,
+    reused from the Crack Egg pattern) now carries an extra Category column
+    (`MortCat` — Good/Dry/Runt/Green/PM-Reject, `@JsonValue`'d to match the
+    frontend's string union exactly) but is otherwise identical in shape:
+    `UpdateMortSaleRequest` only allows correcting customer/state/qty/price/
+    credit/advance, never category or payment method, once a sale is made.
+    Credit/Advance stay hand-typed by staff on the sale form (never
+    auto-derived), same as Crack Egg and unlike Whole Egg. The Dashboard
+    tab's Sales Revenue card sums a single bounded fetch
+    (`GET /sales?size=500`) rather than adding a dedicated revenue-aggregate
+    endpoint — same judgment call as Whole Egg's bounded customer-history
+    fetch, comfortably covers realistic daily volume without a new backend
+    call.
+  - Feed Mill (`FeedMillView.tsx`) is the sixth converted and — the largest
+    module by entity count so far — needed zero backend changes;
+    `FeedMillController`/`FeedMillService` were already complete from Phase 3.
+    Ingredient Inventory and Fish Feed Stock have no day dimension at all
+    (pure running totals, same as Whole Egg's `WeCategoryValue`), so Opening
+    Stock, Qty Added, Min Level and Unit all autosave on blur/change through
+    `OpeningStockCell`/`NumInput` exactly like every other module's stock
+    tables; ingredient names (not numeric IDs) are the path key for these
+    endpoints, so the frontend URL-encodes each name (`Premix (Layer)` etc.)
+    when building the request path. `low` and `closing` are read straight off
+    `FeedIngredientResponse` rather than recomputed client-side. Ingredients,
+    feed types, and formulations all start genuinely empty per the backend's
+    "no demo data seeded" design (`FeedMillService`'s class javadoc) — the
+    original's large hardcoded seed arrays (7 ingredients, 7 feed types,
+    nested formulation records) were dropped entirely in favor of real
+    `GET`-driven empty-state rendering plus the existing "Add Ingredient"/
+    "Add Feed Type" inline forms, now wired to `POST /ingredients`/
+    `POST /feed-types`.
+    Formulation editing kept its original two-phase shape but the diffing
+    moved server-side: each ingredient's Qty per Ton autosaves live on blur
+    via `PATCH .../formulation`, and the "Save Formulation" button separately
+    calls `POST .../formulation/save`, which now does its own diff against
+    each entry's `lastSavedQtyPerTon` and only writes a
+    `FeedFormulationHistoryGroup` (+ child items) for ingredients that
+    actually changed — the frontend no longer tracks a baseline snapshot
+    itself. Total kg / status (ok/under/over) are recomputed locally after
+    each edit for instant feedback using the same `FORMULATION_TARGET_KG`
+    (1000) / `FORMULATION_TOLERANCE_KG` (5) constants the backend uses, then
+    resynced from the server's authoritative `FormulationResponse` after
+    every full reload — this mirrors the same "lightweight client mirror,
+    server resync on refetch" pattern used for Production's local state.
+    Feed Production's client-side `requirements`/`canProduce` computation
+    was replaced entirely by a debounced live call to
+    `GET /production/check?feedTypeId&qtyTons` as the user edits qty/feed
+    type; `runProduction`/`updateProductionEntry` already handle fish-feed
+    auto-transfer and ingredient-usage reconciliation fully server-side, so
+    the frontend no longer replicates `FISH_FEED_MAP`/`FISH_FEED_TARGETS`
+    logic at all — `POST /production` and `PATCH /production/{id}` just
+    refresh Ingredient Inventory, Fish Feed Stock and Production Summary
+    afterward. Fish Feed Stock's `OpeningStockCell` scope convention is
+    `fish:${type}` (e.g. `fish:Fish Starter`), matching
+    `FeedMillService.setFishFeedOpening`'s lock-service scope key exactly.
+    Fish Feed Collection's `CollectionRecordsTable` is reused verbatim
+    (server-paginated, inline-row-edit) in both the Fish Feed Collection tab
+    and the Reports tab, same as the original; `UpdateCollectionRequest`
+    allows every field to be corrected in place with no restricted-field
+    carve-out, unlike every other module's sale/entry edit DTOs.
+    One real judgment call: there is no backend aggregate for "Ingredient
+    Usage by Feed Type" (usage broken out per ingredient × feed type, not
+    just a single daily total), so the Reports tab does a bounded fetch
+    (`GET /production?size=1000`) plus one formulation fetch per feed type
+    (parallel), then replays the same qty-per-ton × tons-produced math the
+    backend's own `reportRow` uses internally — same judgment call as
+    Mortality's bounded dashboard revenue fetch, comfortably covers
+    realistic production volume without a new endpoint. `formulationRef` on
+    `ProductionLogResponse` is rendered as `—` when absent — nothing in
+    `FeedMillService.runProduction` currently sets it, so it is expected to
+    read empty for the foreseeable future; not treated as a bug to fix here.
+    No known transitional gaps remain — Feed Mill was the last module reading
+    stale in-memory Crack Egg Feed Mill Usage figures, and all six Phase 5
+    stock/production modules are now fully live.
+  - Relief Access + Admin (Users/Logs) is the seventh conversion and closes
+    out a gap that had quietly persisted since auth moved to the real
+    backend: `AdminView.tsx`'s User Management and Relief Access tabs, and
+    `ReliefAccessView.tsx`'s `ReliefTab`, were still reading/writing a local
+    in-memory registry in `App.tsx` (`registeredUsers`/`reliefGrants`) that
+    had no relationship to real accounts at all — creating a "user" there
+    never actually let anyone sign in, and granting "relief" there never
+    touched `extraRoles` (which the server already computes correctly at
+    login/refresh via `ReliefAccessService.extraRolesFor`). `UserAdminController`/
+    `ReliefAccessController`/`SystemLogController` were already complete
+    from earlier phases, so this was purely a frontend wiring gap, not a
+    backend one — no backend changes needed.
+    User Management now calls `GET/POST /admin/users`, `PUT /admin/users/{id}`,
+    `PATCH /admin/users/{id}/active`, `POST /admin/users/{id}/reset-password`
+    directly; the Create User form dropped its Email and Password fields
+    entirely (`CreateUserRequest` only ever took `fullName`/`username`/`role`
+    — there's no email column on `User`, and passwords are always server-
+    generated, never operator-chosen). Both Create User and Reset Password
+    now surface the real one-time `generatedPassword` in the same
+    "temporary password" panel the original mock used only for resets — the
+    generated value is never retrievable again after that panel closes,
+    matching `CreateUserResponse`/`ResetPasswordResponse`'s one-time-reveal
+    contract exactly. There's no search endpoint on `UserAdminController`,
+    so the Users table does one bounded fetch (`size=200`) and filters/
+    paginates client-side — same judgment call as every other "no dedicated
+    query endpoint" case in this migration, comfortably covers realistic
+    headcount for a single farm.
+    `ReliefTab` is now fully self-contained (no props) — it fetches
+    `GET /admin/relief-access/eligible-users` + `/active` itself and posts
+    grants/revokes straight to `POST /admin/relief-access` /
+    `POST /admin/relief-access/{id}/revoke`; `AdminView` no longer threads
+    `registeredUsers`/`grants`/`onGrant`/`onRevoke`/`onSetAccountActive`/
+    `onCreateUser`/`onUpdateUser` down to it at all, and `App.tsx` dropped
+    that entire local registry (~70 lines) along with the now-unused
+    `SYS_USERS`/`RegisteredUser`/`ReliefGrant` imports. Grant/revoke
+    validation (relieving officer can't cover themselves, on-leave user
+    can't already have an active grant) is checked client-side first for
+    instant feedback, exactly mirroring `ReliefAccessService.grant`'s own
+    server-side checks — both layers agree by construction since the
+    frontend copy was written directly from reading the service method.
+    Security & Logs replaced its three hardcoded arrays
+    (`ACCESS_LOG`/`ACTIVITY_LOG`/`AUDIT`) with one `SystemLogTable`
+    component reused for all three sub-tabs, calling
+    `GET /admin/logs/{ACCESS|ACTIVITY|AUDIT}` (server-paginated) — matches
+    `SystemLogController`'s single-table-discriminated-by-`LogType` design
+    exactly, so no per-tab special-casing was needed beyond which columns
+    to show.
+    One real functional gap got fixed as a side effect of this conversion,
+    not just a data-source swap: the Opening Stock Requests tab was reading
+    `farm.openingRequests` from `store.tsx`'s `FarmProvider`, a second
+    local-only array that nothing had written to since every module's
+    `OpeningStockCell` started posting straight to the real
+    `POST /opening-stock/requests` endpoint (Phase 5, `OpeningStockCell`
+    rewrite) — meaning every pending request submitted since then was
+    invisible to the admin, and approving one there
+    (`farm.resolveOpeningRequest`) never actually called
+    `OpeningStockRequestService.resolve`, so the real lock never unlocked.
+    The tab now calls `GET /opening-stock/requests` (bounded fetch,
+    `size=200`, split client-side into pending vs. resolved like the
+    original array was) and `POST /opening-stock/requests/{id}/resolve`
+    directly — this is the only path by which `lockService.unlock` ever
+    runs, so this was blocking every module's "request to re-edit Opening
+    Stock" flow from ever actually resolving, not just a cosmetic staleness
+    issue.
+    Roles & Permissions and System Configuration are unchanged — both are
+    genuinely reference/local-only (a static permissions matrix and a farm-
+    info/pens/categories editor with no backend model behind them yet), out
+    of scope for this pass.
+  - Reports tabs (eighth conversion, all six modules + General Report) is
+    the largest single rewrite of this migration by design-intent, not by
+    line count: §8's design doc was explicit that this was never meant to
+    be a literal port of `ReportsPanel.tsx`'s original "6 static period
+    buckets" shape, and the backend was built accordingly back in Phase 4 —
+    every module exposes exactly `GET {base}/reports/daily?start&end` and
+    `GET {base}/reports/monthly?months=N`, nothing else. `ReportsPanel.tsx`
+    itself was rewritten around that: Week and any custom date range now
+    call `/reports/daily`; Quarter (`months=3`) / Half-Year (`months=6`) /
+    Year (`months=12`) call `/reports/monthly`; Today reuses whatever real
+    per-entity "today" data the calling module already has loaded from its
+    own Phase 3 endpoint (`todayColumns`/`todayRows` props) rather than a
+    new endpoint, exactly as designed. Every stat card is now derived
+    client-side from row data via `rangeStats`/`flatStats` (generalized
+    versions of the original `aggregateStats` helper, applied uniformly
+    instead of only for custom ranges) — the backend has no bespoke stat-
+    card concept, so the four hand-authored "editorial" stats each period
+    used to carry (e.g. Bird Stock's "Mortality Rate %"/"Net Change vs
+    yesterday") are gone, replaced by plain "Total {column}" sums; a real,
+    documented simplification, not an oversight. The trend chart, custom
+    date-range filter, and Excel/PDF/Word export all stayed entirely
+    frontend-side and needed no changes beyond reading from the new data
+    shape. A new `formatCell?: (key, value) => string | number` prop was
+    added (not in the original design doc) because the backend's numeric
+    report columns (e.g. Whole Egg's `revenue`/`avg`, Crack Egg's
+    `goodRevenue`, Mortality's `salesRevenue`) come back as plain numbers,
+    not "₦"-prefixed strings — each module supplies a small formatter
+    (`weFormatCell`, `ceFormatCell`, `mortFormatCell`) so currency columns
+    still render and sum correctly instead of pushing that formatting
+    into the shared component or the backend.
+    Per §8's real-data-gap note, several modules' aggregate report columns
+    are narrower than their old synthetic data implied — Crack Egg dropped
+    `roughToFeed`/`closing` (no historical log, only a live running total),
+    Feed Mill dropped `alerts` (low-stock is live-only) — the frontend
+    column constants for each module now match the backend's actual
+    `REPORT_COLUMNS` exactly rather than the old wider synthetic set.
+    Where no "Today" per-entity endpoint fetch already existed in a
+    module's loaded state (Whole Egg, Crack Egg, Mortality), each got a
+    small bounded fetch (`size=200`, filtered client-side to today's date)
+    added specifically for the Reports tab, following the same "bounded
+    fetch over a new aggregate endpoint" judgment call used throughout
+    Phase 5; Feed Mill's Today rows instead reuse the `usageProduction`/
+    `usageFormulations` state its Ingredient Usage report already fetches.
+    General Report (`GeneralReportView.tsx`) does **not** use `ReportsPanel`
+    at all — per §8 its rows are one-per-module for a date range, not
+    one-per-day/month, which doesn't fit the drill-down model the rest of
+    `ReportsPanel` is built around. It's a small bespoke period-tab +
+    table component instead, computing the same date range semantics
+    (trailing 3/6/12 months for Quarter/Half-Year/Year) client-side and
+    calling the single `GET /api/v1/reports/general?start&end` endpoint.
+    Flagged, not fixed, while doing this: `GeneralReportController` is
+    `@PreAuthorize("hasRole('ADMINISTRATOR')")`-only, but `shared.ts`'s
+    `ACCESS` matrix routes `Managing Director` into `/general-report` too
+    (`canExport={false}` and the "Managing Director" framing in both the
+    original frontend and §8's design doc both imply that role should be
+    able to view it) — a Managing Director account will get a real 403 from
+    this endpoint today. This is a role-policy decision (whether to widen
+    the `@PreAuthorize`, or narrow `ACCESS`), not something to silently
+    patch as a drive-by during a frontend wiring pass — worth resolving in
+    Phase 6's `@PreAuthorize`-vs-§4 audit.
+- **Phase 5: Pagination wiring + final review**: audited every remaining
+    `usePagination(` call site (the old client-side pagination hook) across
+    `src/app` — three left, all a deliberate "bounded fetch + client-side
+    pagination/filter" pattern already used and documented throughout this
+    migration, not a missed server-pagination opportunity: `WholeEggView`'s
+    `CustomerDetail` over `periodTxns` (a client-filtered slice of an
+    already-bounded `size=1000` customer-history fetch), and `AdminView`'s
+    Users table and Opening Stock Requests history, both over `size=200`
+    bounded fetches. Left as-is. Separately, found and removed a block of
+    genuinely dead code left over from the module-by-module API migration:
+    `OpeningStockCell` (`components.tsx`) had carried a dual-mode design
+    since early Phase 5 — a live-backend path (when the caller passes
+    `locked`/`pendingRequest`/`onRequestSubmit`/`onLock`) and a fallback to
+    the original in-memory `useFarm()` store, explicitly so modules could be
+    migrated one at a time without breaking the ones still pending. Now that
+    all six modules (Bird Stock, Production, Whole Egg, Crack Egg,
+    Mortality, Feed Mill) pass those props at every call site, the fallback
+    was unreachable. Removed it, made the four props required, and dropped
+    the `useFarm` import — which in turn meant nothing in the whole
+    frontend called `useFarm()` or read from `FarmContext` any more (the
+    `<FarmProvider>` wrapper in `App.tsx` was only there to supply that
+    context to routes beneath it). Deleted `store.tsx` outright (the
+    in-memory `pens`/`penProd`/`weTransactions`/`gcTransactions`/opening-
+    lock state that predated the backend, ~400 lines) and the `<FarmProvider>`
+    wrapper, plus three smaller orphans this uncovered: `shared.ts`'s
+    `OpeningStockRequest` type and `openingLockKey()` helper (only consumed
+    by the deleted store), `shared.ts`'s `SYS_USERS` mock array and
+    `ReliefGrant` type (superseded by `AdminView`/`ReliefAccessView`'s real
+    API wiring, no longer imported anywhere), and `components.tsx`'s
+    `RegisteredUser` type (same). `npx vite build` succeeded cleanly before
+    and after, with no change in output size — confirming this was already
+    dead, unreferenced code rather than something silently load-bearing.
 - **Phase 6 — Security & hardening pass**: rate limiting, CORS review, actuator
   lockdown, secrets audit, dependency check, a pass through every endpoint confirming
   `@PreAuthorize` matches §4 exactly.
@@ -664,8 +1108,11 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
 
 1. ~~Reports~~ — **decided**: real DB aggregation, built during Phase 4 (§8), not a
    literal port of the frontend's synthetic six-bucket shape.
-2. **Token storage on the frontend**: localStorage (simpler, some XSS exposure) vs. an
-   httpOnly cookie set by the backend (more setup, better protection) for the JWT.
+2. ~~Token storage~~ — **decided**: httpOnly cookie, set by the backend, over
+   localStorage. Better XSS protection was judged worth the extra setup (CORS
+   credentials, a cookie-based auth flow instead of an `Authorization` header,
+   SameSite=Strict in place of token-based CSRF protection — see Phase 5's roadmap
+   entry for exactly what changed).
 3. ~~Crack Egg customer~~ — **decided**: stays free-text, no customer directory or
    running-balance treatment. Whole Egg keeps that feature exclusively.
 4. ~~Default password delivery~~ — **decided**: the system auto-generates a random

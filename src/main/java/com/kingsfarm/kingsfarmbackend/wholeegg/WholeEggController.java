@@ -74,30 +74,35 @@ public class WholeEggController {
     public CustomerResponse createCustomer(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                             @Valid @RequestBody CreateCustomerRequest request) {
         Customer customer = service.createCustomer(request, principal.username());
-        return CustomerResponse.from(customer, service.customerBalance(customer));
+        // A Whole Egg Manager creates customers, never an Administrator (write-restricted above) — isAdmin is always false here.
+        return service.toCustomerResponse(customer, false);
     }
 
     @GetMapping("/customers")
-    public PageResponse<CustomerResponse> listCustomers(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.listCustomers(pageable));
+    public PageResponse<CustomerResponse> listCustomers(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                          @PageableDefault(size = 20) Pageable pageable) {
+        return PageResponse.from(service.listCustomers(pageable, isAdmin(principal)));
     }
 
     @GetMapping("/customers/search")
-    public List<CustomerResponse> searchCustomers(@RequestParam String q) {
-        return service.searchCustomers(q);
+    public List<CustomerResponse> searchCustomers(@AuthenticationPrincipal AuthenticatedPrincipal principal, @RequestParam String q) {
+        return service.searchCustomers(q, isAdmin(principal));
     }
 
     @GetMapping("/customers/recent")
-    public List<CustomerResponse> recentCustomers(@RequestParam(defaultValue = "6") int limit) {
-        return service.recentCustomers(limit);
+    public List<CustomerResponse> recentCustomers(@AuthenticationPrincipal AuthenticatedPrincipal principal, @RequestParam(defaultValue = "6") int limit) {
+        return service.recentCustomers(limit, isAdmin(principal));
+    }
+
+    private boolean isAdmin(AuthenticatedPrincipal principal) {
+        return principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
     }
 
     @GetMapping("/customers/{id}/history")
     public PageResponse<WeSaleTransactionResponse> customerHistory(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                                      @PathVariable Long id,
                                                                      @PageableDefault(size = 20) Pageable pageable) {
-        boolean isAdmin = principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
-        return PageResponse.from(service.customerHistory(id, isAdmin, pageable).map(service::toResponse));
+        return PageResponse.from(service.customerHistory(id, isAdmin(principal), pageable).map(service::toResponse));
     }
 
     // ── Sales / Payments ──────────────────────────────────────────────────
@@ -129,8 +134,12 @@ public class WholeEggController {
     @GetMapping("/transactions")
     public PageResponse<WeSaleTransactionResponse> allTransactions(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                                      @PageableDefault(size = 20) Pageable pageable) {
-        boolean isAdmin = principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
-        return PageResponse.from(service.allTransactions(isAdmin, pageable).map(service::toResponse));
+        return PageResponse.from(service.allTransactions(isAdmin(principal), pageable).map(service::toResponse));
+    }
+
+    @GetMapping("/customers/outstanding-summary")
+    public OutstandingBalanceResponse outstandingSummary() {
+        return service.outstandingTotals();
     }
 
     // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────

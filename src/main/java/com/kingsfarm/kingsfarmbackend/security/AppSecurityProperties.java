@@ -14,6 +14,9 @@ public class AppSecurityProperties {
     @NestedConfigurationProperty
     private Jwt jwt = new Jwt();
 
+    /** Whether the two auth cookies (BACKEND_PLAN.md §11 decision #2) get the Secure attribute — see application.yaml's comment. */
+    private boolean cookieSecure = true;
+
     public String getApiKey() {
         return apiKey;
     }
@@ -28,6 +31,14 @@ public class AppSecurityProperties {
 
     public void setJwt(Jwt jwt) {
         this.jwt = jwt;
+    }
+
+    public boolean isCookieSecure() {
+        return cookieSecure;
+    }
+
+    public void setCookieSecure(boolean cookieSecure) {
+        this.cookieSecure = cookieSecure;
     }
 
     public static class Jwt {
