@@ -550,8 +550,8 @@ public class FeedMillService {
     @Transactional(readOnly = true)
     public ReportTableResponse monthlyReport(int months) {
         List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
-        LocalDate start = monthsList.getFirst().atDay(1);
-        LocalDate end = monthsList.getLast().atEndOfMonth();
+        LocalDate start = monthsList.get(0).atDay(1);
+        LocalDate end = monthsList.get(monthsList.size() - 1).atEndOfMonth();
         Instant rangeStart = ReportPeriods.startOfDay(start);
         Instant rangeEnd = ReportPeriods.startOfNextDay(end);
         Map<Long, Double> formulationRatioCache = new HashMap<>();

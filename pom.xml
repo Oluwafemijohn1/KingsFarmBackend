@@ -27,7 +27,7 @@
         <url/>
     </scm>
     <properties>
-        <java.version>26</java.version>
+        <java.version>17</java.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
     <dependencies>
@@ -58,7 +58,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
 
         <!-- JWT signing/verification -->
@@ -78,6 +78,15 @@
             <artifactId>jjwt-jackson</artifactId>
             <version>${jjwt.version}</version>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- Boot 4 moved to Jackson 3 (tools.jackson.core); these classes still use
+             the classic com.fasterxml.jackson.databind API, so bring it in explicitly
+             at compile scope, pinned to the version jjwt-jackson already pulls in. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.21.5</version>
         </dependency>
 
         <dependency>

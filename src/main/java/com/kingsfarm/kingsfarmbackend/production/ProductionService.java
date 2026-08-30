@@ -327,8 +327,8 @@ public class ProductionService {
     @Transactional(readOnly = true)
     public ReportTableResponse monthlyReport(int months) {
         List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
-        LocalDate start = monthsList.getFirst().atDay(1);
-        LocalDate end = monthsList.getLast().atEndOfMonth();
+        LocalDate start = monthsList.get(0).atDay(1);
+        LocalDate end = monthsList.get(monthsList.size() - 1).atEndOfMonth();
         List<ProductionPenEntry> entries = penEntryRepository.findAllByEntryDateBetween(start, end);
         Map<YearMonth, List<ProductionPenEntry>> byMonth = entries.stream()
                 .collect(Collectors.groupingBy(e -> YearMonth.from(e.getEntryDate())));

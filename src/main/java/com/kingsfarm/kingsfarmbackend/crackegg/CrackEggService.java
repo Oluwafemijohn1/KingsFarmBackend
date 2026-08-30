@@ -294,8 +294,8 @@ public class CrackEggService {
     @Transactional(readOnly = true)
     public ReportTableResponse monthlyReport(int months) {
         List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
-        Instant rangeStart = ReportPeriods.startOfDay(monthsList.getFirst().atDay(1));
-        Instant rangeEnd = ReportPeriods.startOfNextDay(monthsList.getLast().atEndOfMonth());
+        Instant rangeStart = ReportPeriods.startOfDay(monthsList.get(0).atDay(1));
+        Instant rangeEnd = ReportPeriods.startOfNextDay(monthsList.get(monthsList.size() - 1).atEndOfMonth());
         Map<YearMonth, List<GcSaleTransaction>> salesByMonth = salesInRange(rangeStart, rangeEnd).stream()
                 .collect(Collectors.groupingBy(t -> YearMonth.from(t.getOccurredAt().atZone(ZONE).toLocalDate())));
         Map<YearMonth, List<CrackEggGiftLogEntry>> giftsByMonth = giftsInRange(rangeStart, rangeEnd).stream()

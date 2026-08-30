@@ -218,8 +218,8 @@ public class BirdStockService {
     @Transactional(readOnly = true)
     public ReportTableResponse monthlyReport(int months) {
         List<YearMonth> monthsList = ReportPeriods.trailingMonths(months);
-        LocalDate start = monthsList.getFirst().atDay(1);
-        LocalDate end = monthsList.getLast().atEndOfMonth();
+        LocalDate start = monthsList.get(0).atDay(1);
+        LocalDate end = monthsList.get(monthsList.size() - 1).atEndOfMonth();
         List<BirdPenRecord> records = recordRepository.findAllByEntryDateBetween(start, end);
         Map<YearMonth, List<BirdPenRecord>> byMonth = records.stream()
                 .collect(Collectors.groupingBy(r -> YearMonth.from(r.getEntryDate())));
