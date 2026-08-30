@@ -12,13 +12,15 @@ import java.time.LocalDate;
 
 /**
  * Backs GeneralReportView — the Managing Director's farm-wide summary
- * (BACKEND_PLAN.md §8). Administrator-only, matching the frontend's
- * {@code canExport={false}} + "Managing Director" framing: this is a
- * top-level view, not something any single module manager reaches.
+ * (BACKEND_PLAN.md §8). Per §4's access map, Managing Director's only
+ * module is general-report (read-only, farm-wide), and Administrator has
+ * everything — so both roles, and only those two, can reach this. Fixed in
+ * Phase 6 after the frontend wiring pass flagged that this used to be
+ * Administrator-only, which 403'd the very role this view exists for.
  */
 @RestController
 @RequestMapping("/api/v1/reports")
-@PreAuthorize("hasRole('ADMINISTRATOR')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR')")
 public class GeneralReportController {
 
     private final GeneralReportService service;

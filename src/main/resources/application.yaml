@@ -3,12 +3,16 @@ spring:
     name: KingsFarmBackend
 
   # Local MySQL connection — matches the `kingsfarm_db` database created via
-  # Homebrew's mysql service (see the setup walkthrough). Change these three
-  # values if your local username/password/db name differ.
+  # Homebrew's mysql service (see the setup walkthrough). Username/password
+  # are read from DB_USERNAME/DB_PASSWORD (BACKEND_PLAN.md §11) — set those
+  # in your shell/IDE run config to your actual local MySQL credentials; the
+  # fallbacks below are placeholders, not real values (Phase 6: this file
+  # used to have a real local password committed in plaintext — rotate that
+  # MySQL password, since it's already in git history).
   datasource:
     url: jdbc:mysql://localhost:3306/kingsfarm_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC
-    username: root
-    password: "Emmanuel@123"
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:changeme}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -56,6 +60,9 @@ app:
     # exception, so this works out of the box in local dev too. Only flip this
     # to false if you hit a browser that doesn't grant that localhost exception.
     cookie-secure: ${AUTH_COOKIE_SECURE:true}
+    # Comma-separated list of origins the frontend is served from — see
+    # AppSecurityProperties' javadoc and SecurityConfig's CORS filter.
+    cors-allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   # Seeds exactly one Administrator account on first startup (see
   # DataSeeder) so there's a way to log in at all before any other user
   # exists — every account after this one is created by that Administrator

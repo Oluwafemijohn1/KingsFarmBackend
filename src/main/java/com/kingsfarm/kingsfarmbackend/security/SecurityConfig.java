@@ -19,9 +19,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import java.util.List;
 
 /**
- * Wires the two custom filters in front of everything else:
- * ApiKeyFilter (shared-secret gate, rejects any client without X-API-Key)
- * runs first, then JwtAuthenticationFilter (per-user auth) populates the
+ * Wires the three custom filters in front of everything else, in order:
+ * RateLimitFilter (Phase 6 — rejects a flood before anything else runs),
+ * then ApiKeyFilter (shared-secret gate, rejects any client without
+ * X-API-Key), then JwtAuthenticationFilter (per-user auth) populates the
  * SecurityContext for @PreAuthorize checks on individual controller methods.
  * Fine-grained role rules live on the controllers themselves (matching the
  * ACCESS map in the frontend's shared.ts) rather than here, since most of
@@ -60,9 +61,15 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated()
                 )
+                .addFilterBefore(rateLimitFilter(), ApiKeyFilter.class)
                 .addFilterBefore(apiKeyFilter(), UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(jwtAuthenticationFilter(), ApiKeyFilter.class);
         return http.build();
+    }
+
+    @Bean
+    public RateLimitFilter rateLimitFilter() {
+        return new RateLimitFilter(objectMapper);
     }
 
     @Bean
@@ -85,12 +92,14 @@ public class SecurityConfig {
 
     private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Vite dev server defaults; tighten/parameterize before deploying anywhere real.
-        // Explicit origins (never "*") are required here, not just preferred — a
-        // credentialed request (allowCredentials below, needed so the browser will
-        // actually send the httpOnly auth cookies) is rejected by every browser if the
-        // response's Access-Control-Allow-Origin is a wildcard.
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://127.0.0.1:5173"));
+        // Read from app.security.cors-allowed-origins (APP_CORS_ALLOWED_ORIGINS env
+        // var in real use — BACKEND_PLAN.md §11), defaulting to the Vite dev server's
+        // origins so local checkouts still work with zero config. Explicit origins
+        // (never "*") are required here, not just preferred — a credentialed request
+        // (allowCredentials below, needed so the browser will actually send the
+        // httpOnly auth cookies) is rejected by every browser if the response's
+        // Access-Control-Allow-Origin is a wildcard.
+        configuration.setAllowedOrigins(securityProperties.getCorsAllowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-API-Key"));
         configuration.setAllowCredentials(true);

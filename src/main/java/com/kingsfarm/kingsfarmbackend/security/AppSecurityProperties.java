@@ -4,6 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /** Binds the {@code app.security.*} block in application.yaml — see the comments there for what each value means. */
 @Component
 @ConfigurationProperties(prefix = "app.security")
@@ -17,12 +19,28 @@ public class AppSecurityProperties {
     /** Whether the two auth cookies (BACKEND_PLAN.md §11 decision #2) get the Secure attribute — see application.yaml's comment. */
     private boolean cookieSecure = true;
 
+    /**
+     * Origins the frontend is served from — read into {@link SecurityConfig}'s
+     * CORS filter. Comma-separated in the env var (Spring's relaxed binding
+     * splits it into this list automatically); the Vite dev-server default
+     * below is only a local-dev convenience, same as every other value here.
+     */
+    private List<String> corsAllowedOrigins = List.of();
+
     public String getApiKey() {
         return apiKey;
     }
 
     public void setApiKey(String apiKey) {
         this.apiKey = apiKey;
+    }
+
+    public List<String> getCorsAllowedOrigins() {
+        return corsAllowedOrigins;
+    }
+
+    public void setCorsAllowedOrigins(List<String> corsAllowedOrigins) {
+        this.corsAllowedOrigins = corsAllowedOrigins;
     }
 
     public Jwt getJwt() {

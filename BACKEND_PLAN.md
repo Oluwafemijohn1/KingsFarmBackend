@@ -1098,9 +1098,91 @@ This phase is its own significant chunk of work, not a footnote — flagged as P
     `RegisteredUser` type (same). `npx vite build` succeeded cleanly before
     and after, with no change in output size — confirming this was already
     dead, unreferenced code rather than something silently load-bearing.
-- **Phase 6 — Security & hardening pass**: rate limiting, CORS review, actuator
-  lockdown, secrets audit, dependency check, a pass through every endpoint confirming
-  `@PreAuthorize` matches §4 exactly.
+- **Phase 6: `@PreAuthorize`-vs-§4 audit**: read every `@RestController` in the
+    backend (14 total) and compared its class-level and method-level
+    `@PreAuthorize` against §4's access map. Found and fixed exactly one
+    mismatch — `GeneralReportController` was `hasRole('ADMINISTRATOR')`-only,
+    but §4 explicitly gives Managing Director general-report as their one
+    module, so that role was getting a real 403 on the only thing it exists
+    to view. Widened to `hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR')`.
+    Everything else checked out: every per-module controller
+    (BirdStock/Production/WholeEgg/CrackEgg/Mortality/FeedMill) follows the
+    same intentional, already-documented split — class-level
+    `hasAnyRole('ADMINISTRATOR', '<ROLE>_MANAGER')` grants both roles read
+    access, then write endpoints (`POST`/`PUT`/`PATCH`) carry their own
+    narrower `hasRole('<ROLE>_MANAGER')` so Administrators can view but
+    never directly mutate module data — consistent with `OpeningStockCell`'s
+    "Administrators never edit... directly, in any module" rule. Admin-only
+    surfaces (`UserAdminController`, `SystemLogController`,
+    `SecuritySettingsController`, `ReliefAccessController`, and
+    `OpeningStockController`'s list/resolve endpoints) are all correctly
+    `hasRole('ADMINISTRATOR')`-only, matching `admin` being Administrator-
+    exclusive in §4. `OpeningStockController`'s shared GET-lock-status/
+    POST-request endpoints are intentionally open to any authenticated user
+    (fine-grained module access is enforced by the calling module's own
+    controller, per its own javadoc). `AuthController`'s login/refresh/
+    logout are correctly unauthenticated (public), and `/me`/
+    `/change-password` require only a valid session, no specific role.
+- **Phase 6 — Security & hardening pass**: completed the remaining five items.
+  - **CORS review**: origins were hardcoded to the two Vite dev-server addresses
+    with a comment flagging "tighten/parameterize before deploying anywhere
+    real." Parameterized: `AppSecurityProperties.corsAllowedOrigins` (new,
+    bound from `app.security.cors-allowed-origins`, comma-separated) feeds
+    `SecurityConfig`'s CORS filter, read from `APP_CORS_ALLOWED_ORIGINS`
+    (falls back to the same two dev origins so local checkouts still work
+    with zero config) — same pattern as `API_SHARED_KEY`/`JWT_SECRET`.
+  - **Actuator lockdown**: already correct, no change needed. `application.yaml`
+    exposes only `health` (`management.endpoints.web.exposure.include:
+    health`), and `RateLimitFilter`/`ApiKeyFilter` both run as servlet filters
+    ahead of Spring Security's `authorizeHttpRequests`, so even the
+    `permitAll()`'d `/actuator/health` still has to clear the API-key gate
+    first — nothing actuator-related is reachable by an untrusted client.
+  - **Secrets audit**: found a real one. `application.yaml`'s MySQL
+    `datasource.username`/`password` were hardcoded (`root` /
+    `"Emmanuel@123"`) rather than read from an env var like every other
+    secret in that file — and that file is committed, so the real password
+    has been sitting in git history since the `Initial project` /
+    `Connected to DB.` commits. Parameterized to
+    `${DB_USERNAME:root}`/`${DB_PASSWORD:changeme}` (placeholder fallback,
+    not the real value) matching the `API_SHARED_KEY`/`JWT_SECRET` pattern.
+    **Not done here, needs a human decision**: rotate the actual MySQL
+    password (changing the file doesn't remove it from git history), and
+    decide whether that history needs scrubbing given how the repo is
+    hosted/shared.
+  - **Dependency check**: no pinned-version CVEs to act on. Cross-checked the
+    April 23, 2026 Spring Boot 8-CVE batch (headlined by CVE-2026-40976,
+    critical, an actuator-vs-health module-split bug making the whole default
+    filter chain unauthenticated) against this app's actual versions/config:
+    every one of the 8 is either scoped to Spring Boot 4.0.0–4.0.5 specifically
+    (this app is on 4.1.1, and separately isn't relying on the *default*
+    filter chain at all — `SecurityConfig` defines its own), or gated on a
+    feature/config this app doesn't use (Elasticsearch/RabbitMQ/Cassandra SSL
+    bundles, `server.servlet.session.persistent=true`, `${random.value}`
+    placeholders, `spring-boot-devtools` — none present). `jjwt` 0.12.6 (used
+    for JWT signing) has no known CVEs against it directly; the one JJWT CVE
+    that comes up in searches (CVE-2024-31033) is against 0.11.5, already
+    fixed by being on 0.12.x. `mysql-connector-j` is intentionally unpinned,
+    inheriting whatever version the `spring-boot-starter-parent:4.1.1` BOM
+    manages, rather than a version chosen and left to go stale here. Worth
+    re-checking whenever bumping the Spring Boot parent version, not a
+    one-time clearance.
+  - **Rate limiting**: added `RateLimitFilter` (new,
+    `security/RateLimitFilter.java`) — in-memory, per-IP, fixed 60-second
+    windows, no new Maven dependency (a library like Bucket4j would need a
+    dependency this offline-during-development environment can't resolve or
+    compile-verify). Two limits: a strict one (10/min/IP) on
+    `POST /api/v1/auth/login` specifically, and a generous general-abuse
+    backstop (120/min/IP) on everything else. Why login needs its own limit
+    even though `AuthService` already has per-account lockout
+    (`SecuritySettings.lockoutAttempts`, 5 attempts → 15-minute lock): that
+    lockout only engages once a *known* username has racked up failed
+    attempts — an attacker cycling through usernames, or just hammering with
+    one that doesn't exist, hits no lockout there at all today, so the two
+    protections are complementary, not redundant. Registered first in the
+    filter chain, ahead of `ApiKeyFilter`, so a flood is rejected before the
+    API-key check, JWT parsing, or the database are touched. Single-instance-
+    only by design (in-memory map, no shared store) — would need Redis or
+    similar if this ever runs as more than one instance.
 
 ---
 
