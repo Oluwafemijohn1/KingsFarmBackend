@@ -10,4 +10,6 @@ public class KingsFarmBackendApplication {
         SpringApplication.run(KingsFarmBackendApplication.class, args);
     }
 
+    //admin
+    //DWkq$Jo5NHkV
 }

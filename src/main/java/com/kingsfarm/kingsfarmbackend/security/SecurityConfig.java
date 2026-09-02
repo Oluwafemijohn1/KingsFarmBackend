@@ -61,8 +61,15 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(rateLimitFilter(), ApiKeyFilter.class)
+                // Order matters here: addFilterBefore/After need their anchor class to
+                // already have a registered position. apiKeyFilter() must register first
+                // (anchored to the built-in UsernamePasswordAuthenticationFilter, which
+                // always has a known order) before anything can be positioned relative
+                // to ApiKeyFilter.class itself — putting rateLimitFilter's line first
+                // threw "The Filter class ApiKeyFilter does not have a registered order"
+                // at startup, since ApiKeyFilter hadn't been registered yet at that point.
                 .addFilterBefore(apiKeyFilter(), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(rateLimitFilter(), ApiKeyFilter.class)
                 .addFilterAfter(jwtAuthenticationFilter(), ApiKeyFilter.class);
         return http.build();
     }

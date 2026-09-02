@@ -10,7 +10,13 @@ spring:
   # used to have a real local password committed in plaintext — rotate that
   # MySQL password, since it's already in git history).
   datasource:
-    url: jdbc:mysql://localhost:3306/kingsfarm_db?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC
+    # allowPublicKeyRetrieval=true is required alongside useSSL=false for MySQL
+    # 8+'s default caching_sha2_password auth plugin — without it, the driver
+    # can't fetch the server's RSA public key to send the password securely
+    # over a non-SSL connection, and every connection attempt fails with
+    # "Public Key Retrieval is not allowed." Fine for local dev over
+    # localhost; a real deployment should use SSL instead of this flag.
+    url: jdbc:mysql://localhost:3306/kingsfarm_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:changeme}
     driver-class-name: com.mysql.cj.jdbc.Driver
