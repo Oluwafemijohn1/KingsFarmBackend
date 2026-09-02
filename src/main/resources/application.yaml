@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: KingsFarmBackend
+
+  # Local MySQL connection — matches the `kingsfarm_db` database created via
+  # Homebrew's mysql service (see the setup walkthrough). Username/password
+  # are read from DB_USERNAME/DB_PASSWORD (BACKEND_PLAN.md §11) — set those
+  # in your shell/IDE run config to your actual local MySQL credentials; the
+  # fallbacks below are placeholders, not real values (Phase 6: this file
+  # used to have a real local password committed in plaintext — rotate that
+  # MySQL password, since it's already in git history).
+  datasource:
+    # allowPublicKeyRetrieval=true is required alongside useSSL=false for MySQL
+    # 8+'s default caching_sha2_password auth plugin — without it, the driver
+    # can't fetch the server's RSA public key to send the password securely
+    # over a non-SSL connection, and every connection attempt fails with
+    # "Public Key Retrieval is not allowed." Fine for local dev over
+    # localhost; a real deployment should use SSL instead of this flag.
+    url: jdbc:mysql://localhost:3306/kingsfarm_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:changeme}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      # "update" auto-creates/updates tables from your @Entity classes on
+      # startup — convenient while building locally. Switch to "validate"
+      # (and manage schema changes via migrations) once this is closer to
+      # production.
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+# Only expose a bare-minimum health check on the actuator — everything else
+# (env, beans, mappings, etc.) stays off, and even /health still sits behind
+# the API key filter like every other endpoint.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+# App-specific security config. All three of these are read from environment
+# variables in real use (see BACKEND_PLAN.md §3/§11) — the fallback values
+# below only exist so the app runs out of the box on a first local checkout.
+# Before this ever leaves your machine, set real values for API_SHARED_KEY
+# and JWT_SECRET as environment variables instead of relying on defaults.
+app:
+  security:
+    # Shared secret every request must send as the X-API-Key header, checked
+    # before Spring Security even runs — keeps random clients off the API.
+    api-key: ${API_SHARED_KEY:local-dev-api-key-change-me}
+    jwt:
+      # HS256 needs a secret of at least 256 bits (32 chars) — this default is
+      # long enough to work, but is not a secret and must never be used
+      # outside local development.
+      secret: ${JWT_SECRET:local-dev-only-jwt-signing-secret-replace-me-before-deploying-anywhere-real}
+      access-token-minutes: ${JWT_ACCESS_MINUTES:30}
+      refresh-token-days: ${JWT_REFRESH_DAYS:7}
+    # Both auth cookies (BACKEND_PLAN.md §11 decision #2) are always httpOnly +
+    # SameSite=Strict; Secure additionally requires HTTPS. Defaults to true —
+    # Chrome/Edge/recent Firefox all treat http://localhost as a secure-context
+    # exception, so this works out of the box in local dev too. Only flip this
+    # to false if you hit a browser that doesn't grant that localhost exception.
+    cookie-secure: ${AUTH_COOKIE_SECURE:true}
+    # Comma-separated list of origins the frontend is served from — see
+    # AppSecurityProperties' javadoc and SecurityConfig's CORS filter.
+    cors-allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  # Seeds exactly one Administrator account on first startup (see
+  # DataSeeder) so there's a way to log in at all before any other user
+  # exists — every account after this one is created by that Administrator
+  # from inside the app, never by signing up.
+  bootstrap:
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    admin-full-name: ${BOOTSTRAP_ADMIN_NAME:System Administrator}
