@@ -121,7 +121,7 @@ public class ProductionService {
         return birdPenRecordRepository.findByPenAndEntryDate(pen, date).map(BirdPenRecord::closing).orElse(0);
     }
 
-    public String productionPercent(int totalCrates, int birdClosing) {
+    public String productionPercent(double totalCrates, int birdClosing) {
         if (birdClosing == 0) {
             return "—";
         }
@@ -133,16 +133,16 @@ public class ProductionService {
         return entryDate.isEqual(LocalDate.now());
     }
 
-    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. */
+    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. Double: pen entries can be partial crates. */
     @Transactional(readOnly = true)
-    public java.util.Map<CatKey, Integer> catProdTotals(LocalDate date) {
-        java.util.Map<CatKey, Integer> totals = new java.util.EnumMap<>(CatKey.class);
+    public java.util.Map<CatKey, Double> catProdTotals(LocalDate date) {
+        java.util.Map<CatKey, Double> totals = new java.util.EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
-            totals.put(k, 0);
+            totals.put(k, 0.0);
         }
         for (ProductionPenEntry entry : penEntryRepository.findAllByEntryDate(date)) {
             for (CatKey k : CatKey.values()) {
-                totals.merge(k, entry.get(k), Integer::sum);
+                totals.merge(k, entry.get(k), Double::sum);
             }
         }
         return totals;
@@ -181,8 +181,8 @@ public class ProductionService {
             if (previous != null) {
                 LocalDate prevDate = previous.getEntryDate();
                 for (CatKey k : CatKey.values()) {
-                    int prevProd = catProdTotals(prevDate).get(k);
-                    int prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
+                    double prevProd = catProdTotals(prevDate).get(k);
+                    double prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
                     builder = switch (k) {
                         case X_LARGE -> builder.catOpeningXl(prevClosing);
                         case LARGE -> builder.catOpeningLg(prevClosing);
@@ -248,16 +248,16 @@ public class ProductionService {
     @Transactional(readOnly = true)
     public ProductionDayStateResponse toResponse(ProductionDayState state) {
         LocalDate date = state.getEntryDate();
-        java.util.Map<CatKey, Integer> production = catProdTotals(date);
+        java.util.Map<CatKey, Double> production = catProdTotals(date);
 
         List<CategoryStockRow> rows = new java.util.ArrayList<>();
         for (CatKey k : CatKey.values()) {
-            int opening = state.catOpening(k);
-            int prod = production.get(k);
+            double opening = state.catOpening(k);
+            double prod = production.get(k);
             int crackUse = wholeEggCrackUse(k);
             int sales = wholeEggTotalSales(k);
             int gift = wholeEggGift(k);
-            int closing = opening + prod - crackUse - sales - gift;
+            double closing = opening + prod - crackUse - sales - gift;
             rows.add(new CategoryStockRow(k, opening, prod, crackUse, sales, gift, closing, lockService.isLocked(Mod.PRODUCTION, k.wire())));
         }
 
@@ -342,10 +342,10 @@ public class ProductionService {
     }
 
     private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod) {
-        int xl = entries.stream().mapToInt(ProductionPenEntry::getQtyXl).sum();
-        int lg = entries.stream().mapToInt(ProductionPenEntry::getQtyLg).sum();
-        int md = entries.stream().mapToInt(ProductionPenEntry::getQtyMd).sum();
-        int crates = entries.stream().mapToInt(ProductionPenEntry::total).sum();
+        double xl = entries.stream().mapToDouble(ProductionPenEntry::getQtyXl).sum();
+        double lg = entries.stream().mapToDouble(ProductionPenEntry::getQtyLg).sum();
+        double md = entries.stream().mapToDouble(ProductionPenEntry::getQtyMd).sum();
+        double crates = entries.stream().mapToDouble(ProductionPenEntry::total).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
         row.put("crates", crates);

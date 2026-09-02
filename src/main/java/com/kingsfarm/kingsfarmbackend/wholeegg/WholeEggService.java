@@ -164,13 +164,18 @@ public class WholeEggService {
         Map<CatKey, Long> price = categoryMap(WeCategoryValueKind.PRICE);
         Map<CatKey, Long> salesCrack = categoryMap(WeCategoryValueKind.SALES_CRACK);
         Map<CatKey, Long> gift = categoryMap(WeCategoryValueKind.GIFT);
-        Map<CatKey, Integer> production = productionService.catProdTotals(LocalDate.now());
+        // Production by Pen now accepts partial crates (see ProductionService/
+        // ProductionPenEntry's javadoc), so catProdTotals() returns doubles —
+        // rounded here, at the boundary, since this page's Stock Overview
+        // contract stays whole-crate counts. Out of this change's scope to
+        // widen; Whole Egg's own sales/gift figures are still integer-only.
+        Map<CatKey, Double> production = productionService.catProdTotals(LocalDate.now());
         Map<CatKey, Integer> sales = soldQtyByCategory();
 
         List<StockRowResponse> rows = new ArrayList<>();
         for (CatKey k : CatKey.values()) {
             int op = opening.get(k).intValue();
-            int prod = production.getOrDefault(k, 0);
+            int prod = (int) Math.round(production.getOrDefault(k, 0.0));
             int sold = sales.getOrDefault(k, 0);
             int crack = salesCrack.get(k).intValue();
             int g = gift.get(k).intValue();

@@ -43,29 +43,32 @@ public class ProductionDayState {
     @Column(name = "entry_date", nullable = false)
     private LocalDate entryDate;
 
+    // double, not int — carries forward yesterday's Closing Stock, which is
+    // now potentially fractional since Production by Pen accepts partial
+    // crates (see ProductionPenEntry/CategoryStockRow).
     @Column(name = "cat_opening_xl", nullable = false)
     @Builder.Default
-    private int catOpeningXl = 0;
+    private double catOpeningXl = 0;
 
     @Column(name = "cat_opening_lg", nullable = false)
     @Builder.Default
-    private int catOpeningLg = 0;
+    private double catOpeningLg = 0;
 
     @Column(name = "cat_opening_md", nullable = false)
     @Builder.Default
-    private int catOpeningMd = 0;
+    private double catOpeningMd = 0;
 
     @Column(name = "cat_opening_sm", nullable = false)
     @Builder.Default
-    private int catOpeningSm = 0;
+    private double catOpeningSm = 0;
 
     @Column(name = "cat_opening_pl", nullable = false)
     @Builder.Default
-    private int catOpeningPl = 0;
+    private double catOpeningPl = 0;
 
     @Column(name = "cat_opening_wh", nullable = false)
     @Builder.Default
-    private int catOpeningWh = 0;
+    private double catOpeningWh = 0;
 
     @Column(name = "crack_good_open", nullable = false)
     @Builder.Default
@@ -97,7 +100,7 @@ public class ProductionDayState {
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
 
-    public int catOpening(CatKey category) {
+    public double catOpening(CatKey category) {
         return switch (category) {
             case X_LARGE -> catOpeningXl;
             case LARGE -> catOpeningLg;
@@ -108,7 +111,7 @@ public class ProductionDayState {
         };
     }
 
-    public void setCatOpening(CatKey category, int value) {
+    public void setCatOpening(CatKey category, double value) {
         switch (category) {
             case X_LARGE -> catOpeningXl = value;
             case LARGE -> catOpeningLg = value;
@@ -119,8 +122,8 @@ public class ProductionDayState {
         }
     }
 
-    public Map<CatKey, Integer> catOpeningMap() {
-        Map<CatKey, Integer> map = new EnumMap<>(CatKey.class);
+    public Map<CatKey, Double> catOpeningMap() {
+        Map<CatKey, Double> map = new EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
             map.put(k, catOpening(k));
         }
