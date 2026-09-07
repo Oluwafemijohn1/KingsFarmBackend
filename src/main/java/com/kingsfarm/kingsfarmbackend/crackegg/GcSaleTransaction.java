@@ -39,8 +39,10 @@ public class GcSaleTransaction {
     @Column(nullable = false, length = 64)
     private String state;
 
+    // double, not int — a sale can be a fractional crate (e.g. 0.5, 1.5); see
+    // GcSaleResponse's revenue calc for how this feeds Sales Amount = Qty × Price.
     @Column(nullable = false)
-    private int qty;
+    private double qty;
 
     @Column(nullable = false)
     private long price;

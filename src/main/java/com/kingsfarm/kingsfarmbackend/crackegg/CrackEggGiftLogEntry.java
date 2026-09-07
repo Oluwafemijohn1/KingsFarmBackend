@@ -29,7 +29,7 @@ public class CrackEggGiftLogEntry {
     private Long id;
 
     @Column(nullable = false)
-    private int qty;
+    private double qty;
 
     @Column(length = 255)
     private String recipient;

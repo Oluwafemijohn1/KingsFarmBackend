@@ -7,10 +7,10 @@ package com.kingsfarm.kingsfarmbackend.crackegg.dto;
  * (goodClassify/roughClassify), read live from ProductionService.
  */
 public record StockSummaryResponse(
-        int gcOpening, boolean gcOpeningLocked, int gcProduced, double gcReceived,
-        long gcSellingPrice, int gcGiftQty, String gcGiftRecipient, String gcGiftAuthorizer,
-        int gcTotalSales, long gcRevenue, int gcClosing,
-        int rcOpening, boolean rcOpeningLocked, int rcProduced, double rcReceived,
-        int rcFeedMill, int rcClosing
+        double gcOpening, boolean gcOpeningLocked, double gcProduced, double gcReceived,
+        long gcSellingPrice, double gcGiftQty, String gcGiftRecipient, String gcGiftAuthorizer,
+        double gcTotalSales, double gcRevenue, double gcClosing,
+        double rcOpening, boolean rcOpeningLocked, double rcProduced, double rcReceived,
+        double rcFeedMill, double rcClosing
 ) {
 }

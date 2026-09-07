@@ -69,14 +69,14 @@ public class WholeEggService {
 
     // ── Category values (opening / price / sales-crack / gift) ─────────────
 
-    private long categoryValue(WeCategoryValueKind kind, CatKey category) {
-        return categoryValueRepository.findByKindAndCategory(kind, category).map(WeCategoryValue::getValue).orElse(0L);
+    private double categoryValue(WeCategoryValueKind kind, CatKey category) {
+        return categoryValueRepository.findByKindAndCategory(kind, category).map(WeCategoryValue::getValue).orElse(0.0);
     }
 
-    private Map<CatKey, Long> categoryMap(WeCategoryValueKind kind) {
-        Map<CatKey, Long> map = new EnumMap<>(CatKey.class);
+    private Map<CatKey, Double> categoryMap(WeCategoryValueKind kind) {
+        Map<CatKey, Double> map = new EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
-            map.put(k, 0L);
+            map.put(k, 0.0);
         }
         for (WeCategoryValue v : categoryValueRepository.findAllByKind(kind)) {
             map.put(v.getCategory(), v.getValue());
@@ -84,37 +84,37 @@ public class WholeEggService {
         return map;
     }
 
-    private void setCategoryValue(WeCategoryValueKind kind, CatKey category, long value) {
+    private void setCategoryValue(WeCategoryValueKind kind, CatKey category, double value) {
         WeCategoryValue entity = categoryValueRepository.findByKindAndCategory(kind, category)
                 .orElseGet(() -> WeCategoryValue.builder().kind(kind).category(category).build());
         entity.setValue(value);
         categoryValueRepository.save(entity);
     }
 
-    /** Public "public-facing crack use" reader for ProductionService's Whole Egg → Production feed (see wiring task). */
+    /** Public "public-facing crack use" reader for ProductionService's Whole Egg → Production feed (see wiring task). Fractional crates retained, not truncated. */
     @Transactional(readOnly = true)
-    public int salesCrackFor(CatKey category) {
-        return (int) categoryValue(WeCategoryValueKind.SALES_CRACK, category);
+    public double salesCrackFor(CatKey category) {
+        return categoryValue(WeCategoryValueKind.SALES_CRACK, category);
     }
 
     @Transactional(readOnly = true)
-    public int giftFor(CatKey category) {
-        return (int) categoryValue(WeCategoryValueKind.GIFT, category);
+    public double giftFor(CatKey category) {
+        return categoryValue(WeCategoryValueKind.GIFT, category);
     }
 
     /** Sum of every SALE-type transaction's qty for a category — Production's auto-received "Total Sales". */
     @Transactional(readOnly = true)
-    public int totalSalesFor(CatKey category) {
-        return soldQtyByCategory().getOrDefault(category, 0);
+    public double totalSalesFor(CatKey category) {
+        return soldQtyByCategory().getOrDefault(category, 0.0);
     }
 
-    private Map<CatKey, Integer> soldQtyByCategory() {
-        Map<CatKey, Integer> map = new EnumMap<>(CatKey.class);
+    private Map<CatKey, Double> soldQtyByCategory() {
+        Map<CatKey, Double> map = new EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
-            map.put(k, 0);
+            map.put(k, 0.0);
         }
         for (WeSaleLineItemRepository.CategoryQtyProjection p : lineItemRepository.sumSoldQtyByCategory()) {
-            map.put(p.getCategory(), (int) p.getQty());
+            map.put(p.getCategory(), p.getQty());
         }
         return map;
     }
@@ -160,28 +160,35 @@ public class WholeEggService {
 
     @Transactional(readOnly = true)
     public List<StockRowResponse> stockRows() {
-        Map<CatKey, Long> opening = categoryMap(WeCategoryValueKind.OPENING);
-        Map<CatKey, Long> price = categoryMap(WeCategoryValueKind.PRICE);
-        Map<CatKey, Long> salesCrack = categoryMap(WeCategoryValueKind.SALES_CRACK);
-        Map<CatKey, Long> gift = categoryMap(WeCategoryValueKind.GIFT);
-        Map<CatKey, Integer> production = productionService.catProdTotals(LocalDate.now());
-        Map<CatKey, Integer> sales = soldQtyByCategory();
+        Map<CatKey, Double> opening = categoryMap(WeCategoryValueKind.OPENING);
+        Map<CatKey, Double> price = categoryMap(WeCategoryValueKind.PRICE);
+        Map<CatKey, Double> salesCrack = categoryMap(WeCategoryValueKind.SALES_CRACK);
+        Map<CatKey, Double> gift = categoryMap(WeCategoryValueKind.GIFT);
+        // Production by Pen accepts partial crates (see ProductionService/
+        // ProductionPenEntry's javadoc) and, per the Crate Quantity &
+        // Conversion spec, Whole Egg's own Stock Overview must retain
+        // fractional crates end-to-end too — no rounding boundary here
+        // anymore (1 crate = 30 eggs, 0.5 crate = 15 eggs, etc.).
+        Map<CatKey, Double> production = productionService.catProdTotals(LocalDate.now());
+        Map<CatKey, Double> sales = soldQtyByCategory();
 
         List<StockRowResponse> rows = new ArrayList<>();
         for (CatKey k : CatKey.values()) {
-            int op = opening.get(k).intValue();
-            int prod = production.getOrDefault(k, 0);
-            int sold = sales.getOrDefault(k, 0);
-            int crack = salesCrack.get(k).intValue();
-            int g = gift.get(k).intValue();
-            int closing = op + prod - sold - g - crack;
-            rows.add(new StockRowResponse(k, op, prod, sold, crack, g, closing, price.get(k), lockService.isLocked(Mod.WHOLE_EGG, k.wire())));
+            double op = opening.get(k);
+            double prod = production.getOrDefault(k, 0.0);
+            double sold = sales.getOrDefault(k, 0.0);
+            double crack = salesCrack.get(k);
+            double g = gift.get(k);
+            double closing = op + prod - sold - g - crack;
+            // PRICE is stored in the same double column but is always entered as a whole Naira amount — safe to narrow here.
+            long p = price.get(k).longValue();
+            rows.add(new StockRowResponse(k, op, prod, sold, crack, g, closing, p, lockService.isLocked(Mod.WHOLE_EGG, k.wire())));
         }
         return rows;
     }
 
-    private int closingFor(CatKey category) {
-        return stockRows().stream().filter(r -> r.category() == category).findFirst().map(StockRowResponse::closing).orElse(0);
+    private double closingFor(CatKey category) {
+        return stockRows().stream().filter(r -> r.category() == category).findFirst().map(StockRowResponse::closing).orElse(0.0);
     }
 
     // ── Customers ─────────────────────────────────────────────────────────
@@ -246,10 +253,10 @@ public class WholeEggService {
 
     /** Positive = customer owes; negative = customer has an advance. Derived from the customer's single most recent transaction (a running balance, never summed). */
     @Transactional(readOnly = true)
-    public long customerBalance(Customer customer) {
+    public double customerBalance(Customer customer) {
         return transactionRepository.findFirstByCustomerOrderByOccurredAtDesc(customer)
                 .map(t -> t.getCredit() - t.getAdvance())
-                .orElse(0L);
+                .orElse(0.0);
     }
 
     /**
@@ -264,13 +271,13 @@ public class WholeEggService {
      */
     @Transactional(readOnly = true)
     public CustomerResponse toCustomerResponse(Customer customer, boolean isAdmin) {
-        long balance = customerBalance(customer);
+        double balance = customerBalance(customer);
         Integer year = isAdmin ? null : LocalDate.now().getYear();
         long visits = isAdmin
                 ? transactionRepository.countByCustomer(customer)
                 : transactionRepository.countByCustomerAndTxnYear(customer, year);
-        long crates = lineItemRepository.sumQtyForCustomer(customer, WeSaleTxnType.SALE, year);
-        long revenue = lineItemRepository.sumRevenueForCustomer(customer, WeSaleTxnType.SALE, year);
+        double crates = lineItemRepository.sumQtyForCustomer(customer, WeSaleTxnType.SALE, year);
+        double revenue = lineItemRepository.sumRevenueForCustomer(customer, WeSaleTxnType.SALE, year);
         Instant lastPurchase = (isAdmin
                 ? transactionRepository.findFirstByCustomerOrderByOccurredAtDesc(customer)
                 : transactionRepository.findFirstByCustomerAndTxnYearOrderByOccurredAtDesc(customer, year))
@@ -278,10 +285,10 @@ public class WholeEggService {
         return CustomerResponse.from(customer, balance, visits, crates, revenue, lastPurchase);
     }
 
-    private long priorBalanceFor(WeSaleTransaction txn) {
+    private double priorBalanceFor(WeSaleTransaction txn) {
         return transactionRepository.findFirstByCustomerAndOccurredAtLessThanOrderByOccurredAtDesc(txn.getCustomer(), txn.getOccurredAt())
                 .map(t -> t.getCredit() - t.getAdvance())
-                .orElse(0L);
+                .orElse(0.0);
     }
 
     // ── Sales / Payments ──────────────────────────────────────────────────
@@ -293,25 +300,26 @@ public class WholeEggService {
         Customer customer = customerRepository.findById(request.customerId())
                 .orElseThrow(() -> new NotFoundException("Customer not found."));
 
-        int totalQty = request.items().stream().mapToInt(SaleLineItemRequest::qty).sum();
-        if (totalQty == 0) {
+        double totalQty = request.items().stream().mapToDouble(SaleLineItemRequest::qty).sum();
+        if (totalQty <= 0) {
             throw new BadRequestException("Enter at least one category quantity.");
         }
         validatePaymentMethods(request.paymentMethods(), request.bank());
 
         for (SaleLineItemRequest item : request.items()) {
             if (item.qty() <= 0) continue;
-            int available = closingFor(item.category());
+            double available = closingFor(item.category());
             if (item.qty() > available) {
                 throw new BadRequestException("Cannot sell " + item.qty() + " crates of " + item.category().label() + " — only " + available + " available.");
             }
         }
 
-        long totalDue = request.items().stream().mapToLong(i -> (long) i.qty() * i.price()).sum();
-        long priorBalance = customerBalance(customer);
+        // Sales Amount = Quantity Sold × Price per Crate — must stay fractional (e.g. 0.5 crate × ₦4,000 = ₦2,000), never truncated to a long.
+        double totalDue = request.items().stream().mapToDouble(i -> i.qty() * i.price()).sum();
+        double priorBalance = customerBalance(customer);
         long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
         long amountPaid = amounts[0] + amounts[1];
-        long remaining = totalDue + priorBalance - amountPaid;
+        double remaining = totalDue + priorBalance - amountPaid;
 
         WeSaleTransaction txn = WeSaleTransaction.builder()
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
@@ -338,13 +346,13 @@ public class WholeEggService {
                 .orElseThrow(() -> new NotFoundException("Customer not found."));
 
         validatePaymentMethods(request.paymentMethods(), request.bank());
-        long balanceOwed = customerBalance(customer);
+        double balanceOwed = customerBalance(customer);
         long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
         long amountPaid = amounts[0] + amounts[1];
         if (amountPaid <= 0) {
             throw new BadRequestException("Enter the amount being paid.");
         }
-        long remaining = balanceOwed - amountPaid;
+        double remaining = balanceOwed - amountPaid;
 
         WeSaleTransaction txn = WeSaleTransaction.builder()
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
@@ -368,15 +376,15 @@ public class WholeEggService {
         validatePaymentMethods(request.paymentMethods(), request.bank());
 
         List<SaleLineItemRequest> items = request.items() != null ? request.items() : List.of();
-        int totalQty = items.stream().mapToInt(SaleLineItemRequest::qty).sum();
-        if (txn.getType() == WeSaleTxnType.SALE && totalQty == 0) {
+        double totalQty = items.stream().mapToDouble(SaleLineItemRequest::qty).sum();
+        if (txn.getType() == WeSaleTxnType.SALE && totalQty <= 0) {
             throw new BadRequestException("Enter at least one category quantity.");
         }
-        long totalDue = items.stream().mapToLong(i -> (long) i.qty() * i.price()).sum();
-        long priorBalance = priorBalanceFor(txn);
+        double totalDue = items.stream().mapToDouble(i -> i.qty() * i.price()).sum();
+        double priorBalance = priorBalanceFor(txn);
         long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
         long amountPaid = amounts[0] + amounts[1];
-        long remaining = totalDue + priorBalance - amountPaid;
+        double remaining = totalDue + priorBalance - amountPaid;
 
         lineItemRepository.deleteAllByTransaction(txn);
         for (SaleLineItemRequest item : items) {
@@ -420,9 +428,9 @@ public class WholeEggService {
     @Transactional(readOnly = true)
     public WeSaleTransactionResponse toResponse(WeSaleTransaction txn) {
         List<SaleLineItemResponse> items = lineItemRepository.findAllByTransaction(txn).stream()
-                .map(li -> new SaleLineItemResponse(li.getCategory(), li.getQty(), li.getPrice(), (long) li.getQty() * li.getPrice()))
+                .map(li -> new SaleLineItemResponse(li.getCategory(), li.getQty(), li.getPrice(), li.getQty() * li.getPrice()))
                 .toList();
-        long revenue = items.stream().mapToLong(SaleLineItemResponse::revenue).sum();
+        double revenue = items.stream().mapToDouble(SaleLineItemResponse::revenue).sum();
         return new WeSaleTransactionResponse(
                 txn.getId(), txn.getCustomer().getId(), txn.getCustomerNameSnapshot(), txn.getState(),
                 txn.getType(), txn.getOccurredAt(), txn.getTxnYear(), items, revenue,
@@ -504,14 +512,14 @@ public class WholeEggService {
 
     private Map<String, Object> reportRow(String periodLabel, List<WeSaleTransaction> txns, List<WeSaleLineItemRepository.SaleLineProjection> lines) {
         int txnCount = txns.size();
-        long crates = lines.stream().mapToLong(WeSaleLineItemRepository.SaleLineProjection::getQty).sum();
-        long revenue = lines.stream().mapToLong(li -> (long) li.getQty() * li.getPrice()).sum();
+        double crates = lines.stream().mapToDouble(WeSaleLineItemRepository.SaleLineProjection::getQty).sum();
+        double revenue = lines.stream().mapToDouble(li -> li.getQty() * li.getPrice()).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
         row.put("txns", txnCount);
         row.put("crates", crates);
         row.put("revenue", revenue);
-        row.put("avg", txnCount == 0 ? 0 : Math.round((double) revenue / txnCount));
+        row.put("avg", txnCount == 0 ? 0 : revenue / txnCount);
         return row;
     }
 }

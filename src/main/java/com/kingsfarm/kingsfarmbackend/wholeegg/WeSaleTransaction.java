@@ -81,14 +81,20 @@ public class WeSaleTransaction {
     @Builder.Default
     private long amountPaid = 0;
 
-    /** Never hand-typed — always derived from amountPaid vs. what's owed (this transaction's own total plus whatever balance carried in). */
+    /**
+     * Never hand-typed — always derived from amountPaid vs. what's owed
+     * (this transaction's own total plus whatever balance carried in).
+     * double because totalDue can be fractional when a fractional crate
+     * quantity is sold (qty × price per crate), and that precision must be
+     * retained in the running balance rather than rounded away.
+     */
     @Column(nullable = false)
     @Builder.Default
-    private long credit = 0;
+    private double credit = 0;
 
     @Column(nullable = false)
     @Builder.Default
-    private long advance = 0;
+    private double advance = 0;
 
     @Column(name = "entered_by", length = 64)
     private String enteredBy;

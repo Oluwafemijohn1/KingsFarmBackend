@@ -25,7 +25,7 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
 
     interface CategoryQtyProjection {
         CatKey getCategory();
-        long getQty();
+        double getQty();
     }
 
     /** Every line item belonging to a SALE-type transaction in a half-open instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
@@ -35,7 +35,7 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
 
     interface SaleLineProjection {
         Instant getOccurredAt();
-        int getQty();
+        double getQty();
         long getPrice();
     }
 
@@ -44,15 +44,16 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
      * the Customers directory table (WholeEggView's customerStats). txnYear
      * null means "all time" (Administrator); a manager passes the current
      * year, matching the same restriction customerHistory/allTransactions
-     * already apply.
+     * already apply. double: fractional crate sales must sum correctly
+     * rather than being truncated (Crate Quantity & Conversion spec).
      */
     @Query("select coalesce(sum(li.qty), 0) from WeSaleLineItem li " +
             "where li.transaction.customer = :customer and li.transaction.type = :type " +
             "and (:txnYear is null or li.transaction.txnYear = :txnYear)")
-    long sumQtyForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
+    double sumQtyForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
 
     @Query("select coalesce(sum(li.qty * li.price), 0) from WeSaleLineItem li " +
             "where li.transaction.customer = :customer and li.transaction.type = :type " +
             "and (:txnYear is null or li.transaction.txnYear = :txnYear)")
-    long sumRevenueForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
+    double sumRevenueForCustomer(@Param("customer") Customer customer, @Param("type") WeSaleTxnType type, @Param("txnYear") Integer txnYear);
 }
