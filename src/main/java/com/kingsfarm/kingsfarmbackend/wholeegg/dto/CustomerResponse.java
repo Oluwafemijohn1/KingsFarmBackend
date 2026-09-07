@@ -24,13 +24,13 @@ public record CustomerResponse(
         Instant createdAt,
         String createdBy,
         /** Positive = customer owes this much; negative = customer has this much in advance; zero = settled. */
-        long balance,
+        double balance,
         long visitCount,
-        long totalCrates,
-        long totalRevenue,
+        double totalCrates,
+        double totalRevenue,
         Instant lastPurchaseAt
 ) {
-    public static CustomerResponse from(Customer c, long balance, long visitCount, long totalCrates, long totalRevenue, Instant lastPurchaseAt) {
+    public static CustomerResponse from(Customer c, double balance, long visitCount, double totalCrates, double totalRevenue, Instant lastPurchaseAt) {
         return new CustomerResponse(c.getId(), c.getFirstName(), c.getLastName(), c.getPhone(),
                 c.getState(), c.getLga(), c.getStreet(), c.getCreatedAt(), c.getCreatedBy(), balance,
                 visitCount, totalCrates, totalRevenue, lastPurchaseAt);

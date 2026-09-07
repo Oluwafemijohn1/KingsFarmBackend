@@ -70,21 +70,24 @@ public class ProductionDayState {
     @Builder.Default
     private double catOpeningWh = 0;
 
+    // double, not int — Crack Egg's own gift/sales figures that flow into
+    // the carry-forward closing here (see ProductionService.getTodayDayState)
+    // can be fractional, same reasoning as the cat_opening_* columns above.
     @Column(name = "crack_good_open", nullable = false)
     @Builder.Default
-    private int crackGoodOpen = 0;
+    private double crackGoodOpen = 0;
 
     @Column(name = "crack_rough_open", nullable = false)
     @Builder.Default
-    private int crackRoughOpen = 0;
+    private double crackRoughOpen = 0;
 
     @Column(name = "crack_good_prod", nullable = false)
     @Builder.Default
-    private int crackGoodProd = 0;
+    private double crackGoodProd = 0;
 
     @Column(name = "crack_rough_prod", nullable = false)
     @Builder.Default
-    private int crackRoughProd = 0;
+    private double crackRoughProd = 0;
 
     @Column(name = "good_classify", nullable = false)
     @Builder.Default

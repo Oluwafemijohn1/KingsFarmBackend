@@ -10,9 +10,9 @@ public record GcSaleResponse(
         Long id,
         String customer,
         String state,
-        int qty,
+        double qty,
         long price,
-        long revenue,
+        double revenue,
         Set<PaymentMethod> paymentMethods,
         String bank,
         long cashAmount,
@@ -27,7 +27,7 @@ public record GcSaleResponse(
 ) {
     public static GcSaleResponse from(GcSaleTransaction t, boolean editable) {
         return new GcSaleResponse(
-                t.getId(), t.getCustomer(), t.getState(), t.getQty(), t.getPrice(), (long) t.getQty() * t.getPrice(),
+                t.getId(), t.getCustomer(), t.getState(), t.getQty(), t.getPrice(), t.getQty() * t.getPrice(),
                 t.getPaymentMethods(), t.getBank(), t.getCashAmount(), t.getTransferAmount(), t.getAmountPaid(),
                 t.getCredit(), t.getAdvance(), t.getOccurredAt(), t.getEnteredBy(), t.getUpdatedBy(), editable
         );

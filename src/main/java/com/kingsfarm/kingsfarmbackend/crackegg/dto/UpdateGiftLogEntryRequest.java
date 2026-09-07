@@ -1,9 +1,9 @@
 package com.kingsfarm.kingsfarmbackend.crackegg.dto;
 
-import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.DecimalMin;
 
 public record UpdateGiftLogEntryRequest(
-        @Min(0) int qty,
+        @DecimalMin("0") double qty,
         String recipient,
         String authorizer
 ) {

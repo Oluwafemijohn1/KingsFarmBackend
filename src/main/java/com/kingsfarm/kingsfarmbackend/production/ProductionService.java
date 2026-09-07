@@ -150,23 +150,23 @@ public class ProductionService {
 
     // ── Cross-module auto-feeds ──────────────────────────────────────────────
 
-    private int wholeEggCrackUse(CatKey category) {
+    private double wholeEggCrackUse(CatKey category) {
         return wholeEggService.salesCrackFor(category);
     }
 
-    private int wholeEggTotalSales(CatKey category) {
+    private double wholeEggTotalSales(CatKey category) {
         return wholeEggService.totalSalesFor(category);
     }
 
-    private int wholeEggGift(CatKey category) {
+    private double wholeEggGift(CatKey category) {
         return wholeEggService.giftFor(category);
     }
 
-    private int crackEggGoodGift() {
+    private double crackEggGoodGift() {
         return crackEggService.goodGiftQty();
     }
 
-    private int crackEggGoodSales() {
+    private double crackEggGoodSales() {
         return crackEggService.goodSalesQty();
     }
 
@@ -192,8 +192,8 @@ public class ProductionService {
                         case WHITE -> builder.catOpeningWh(prevClosing);
                     };
                 }
-                int prevCrackGoodClosing = (int) Math.round(previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales());
-                int prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + (int) Math.round(previous.getRoughClassify());
+                double prevCrackGoodClosing = previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales();
+                double prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + previous.getRoughClassify();
                 builder = builder.crackGoodOpen(prevCrackGoodClosing).crackRoughOpen(prevCrackRoughClosing);
             }
             return dayStateRepository.save(builder.build());
@@ -254,9 +254,9 @@ public class ProductionService {
         for (CatKey k : CatKey.values()) {
             double opening = state.catOpening(k);
             double prod = production.get(k);
-            int crackUse = wholeEggCrackUse(k);
-            int sales = wholeEggTotalSales(k);
-            int gift = wholeEggGift(k);
+            double crackUse = wholeEggCrackUse(k);
+            double sales = wholeEggTotalSales(k);
+            double gift = wholeEggGift(k);
             double closing = opening + prod - crackUse - sales - gift;
             rows.add(new CategoryStockRow(k, opening, prod, crackUse, sales, gift, closing, lockService.isLocked(Mod.PRODUCTION, k.wire())));
         }
@@ -268,16 +268,16 @@ public class ProductionService {
         double classifyTotal = state.getGoodClassify() + state.getRoughClassify();
         boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
 
-        int giftAuto = crackEggGoodGift();
-        int salesAuto = crackEggGoodSales();
+        double giftAuto = crackEggGoodGift();
+        double salesAuto = crackEggGoodSales();
         double crackGoodClosing = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify() - giftAuto - salesAuto;
-        int crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + (int) Math.round(state.getRoughClassify());
+        double crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
 
         return new ProductionDayStateResponse(
                 date, rows,
                 state.getCrackGoodOpen(), state.getCrackRoughOpen(), state.getCrackGoodProd(), state.getCrackRoughProd(),
                 state.getGoodClassify(), state.getRoughClassify(),
-                (int) Math.round(totalCrackFromWhole), classifyTotal, mismatch,
+                totalCrackFromWhole, classifyTotal, mismatch,
                 giftAuto, salesAuto, crackGoodClosing, crackRoughClosing,
                 state.getEnteredBy(), state.getUpdatedBy(), isEditable(date)
         );
