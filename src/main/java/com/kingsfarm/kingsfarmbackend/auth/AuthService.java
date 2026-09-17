@@ -16,6 +16,8 @@ import com.kingsfarm.kingsfarmbackend.user.UserRepository;
 import com.kingsfarm.kingsfarmbackend.security.AppSecurityProperties;
 import com.kingsfarm.kingsfarmbackend.security.JwtService;
 import com.kingsfarm.kingsfarmbackend.systemlog.SystemLogService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +45,7 @@ import java.util.List;
 @Service
 public class AuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
 
     private final UserRepository userRepository;
@@ -137,18 +140,38 @@ public class AuthService {
         userRepository.save(user);
     }
 
+    /**
+     * Previously had zero logging anywhere — every "401 storm, then it just
+     * recovered" was invisible on the backend even though this method is
+     * exactly what makes that recovery happen (or not). Failures go through
+     * {@link SystemLogService#logAccess}, same as {@link #login} and
+     * {@link #logout}, so they show up in the Admin Logs UI, not just a
+     * console — a session dying for real (as opposed to a routine access-
+     * token expiry) is worth an administrator being able to see without
+     * needing server log access. A routine successful rotation is by far
+     * the highest-volume case here (it fires automatically every access-
+     * token TTL for every active user), so that one is DEBUG-only via
+     * SLF4J, not written to the persisted system log — logging every
+     * routine renewal there would bury the events actually worth an
+     * administrator's attention.
+     */
     @Transactional
-    public TokenResponse refresh(String rawRefreshToken) {
+    public TokenResponse refresh(String rawRefreshToken, String ipAddress) {
         String hash = jwtService.hashRefreshToken(rawRefreshToken);
-        RefreshToken existing = refreshTokenRepository.findByTokenHash(hash)
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired refresh token."));
+        RefreshToken existing = refreshTokenRepository.findByTokenHash(hash).orElse(null);
+        if (existing == null) {
+            systemLogService.logAccess(null, "unknown", "Refresh", "Failed (unknown token)", ipAddress);
+            throw new InvalidCredentialsException("Invalid or expired refresh token.");
+        }
 
         if (!existing.isActive()) {
+            systemLogService.logAccess(existing.getUser().getId(), existing.getUser().getUsername(), "Refresh", "Failed (inactive/revoked token)", ipAddress);
             throw new InvalidCredentialsException("Invalid or expired refresh token.");
         }
 
         User user = existing.getUser();
         if (!user.isActive()) {
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Refresh", "Failed (inactive user)", ipAddress);
             throw new InvalidCredentialsException("Invalid or expired refresh token.");
         }
         // A grant taking effect mid-session should actually cut the on-leave user off, not just
@@ -156,6 +179,7 @@ public class AuthService {
         // signed in. Their session ends the next time this refresh token would've renewed them
         // (at most one access-token TTL from now).
         if (reliefAccessService.activeLeaveFor(user) != null) {
+            systemLogService.logAccess(user.getId(), user.getUsername(), "Refresh", "Blocked (on leave)", ipAddress);
             throw new OnLeaveException("You're currently on leave. Contact your administrator if this isn't right.");
         }
 
@@ -168,6 +192,7 @@ public class AuthService {
         List<Role> extraRoles = reliefAccessService.extraRolesFor(user);
         String accessToken = jwtService.generateAccessToken(user.getId(), user.getUsername(), user.getRole(), user.isMustChangePassword(), extraRoles);
         String newRefreshToken = issueRefreshToken(user);
+        log.debug("Refresh token rotated for '{}' from {}", user.getUsername(), ipAddress);
         return new TokenResponse(accessToken, newRefreshToken);
     }
 

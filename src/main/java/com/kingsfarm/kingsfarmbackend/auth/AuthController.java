@@ -45,7 +45,7 @@ public class AuthController {
         if (rawRefreshToken == null) {
             throw new InvalidCredentialsException("Invalid or expired refresh token.");
         }
-        TokenResponse tokens = authService.refresh(rawRefreshToken);
+        TokenResponse tokens = authService.refresh(rawRefreshToken, httpRequest.getRemoteAddr());
         authCookies.setAuthCookies(httpResponse, tokens.accessToken(), tokens.refreshToken());
     }
 

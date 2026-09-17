@@ -6,6 +6,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -41,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class RateLimitFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
     private static final int LOGIN_WINDOW_LIMIT = 10;
     // 120/min looked generous in isolation but undercounted how chatty a
     // single page actually is: loading one module tab (e.g. Whole Egg's
@@ -72,10 +75,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean isLogin = "POST".equalsIgnoreCase(request.getMethod()) && LOGIN_PATH.equals(request.getRequestURI());
 
         if (isLogin && !allow(loginWindows, ip, LOGIN_WINDOW_LIMIT)) {
+            log.warn("Rate limit hit (login window) — ip={} path={}", ip, request.getRequestURI());
             writeTooManyRequests(request, response, "Too many login attempts. Please wait a minute and try again.");
             return;
         }
         if (!allow(globalWindows, ip, GLOBAL_WINDOW_LIMIT)) {
+            log.warn("Rate limit hit (global window) — ip={} path={}", ip, request.getRequestURI());
             writeTooManyRequests(request, response, "Too many requests. Please slow down.");
             return;
         }

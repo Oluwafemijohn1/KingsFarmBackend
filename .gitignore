@@ -32,3 +32,6 @@ build/
 ### VS Code ###
 .vscode/
 /.env
+
+### Application logs (see application.yaml's logging.file.name) ###
+logs/
