@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -498,6 +499,33 @@ public class FeedMillService {
     @Transactional(readOnly = true)
     public Page<ProductionLogResponse> productionHistory(Pageable pageable) {
         return productionRepository.findAllByOrderByOccurredAtDesc(pageable)
+                .map(e -> ProductionLogResponse.from(e, isEditable(e.getOccurredAt())));
+    }
+
+    /**
+     * Fish Feed Production History, filtered server-side — same
+     * lazy-association mapping-inside-the-transaction reasoning as
+     * {@link #productionHistory}. {@code typeFilter} narrows to one
+     * specific fish type (matched via {@link #canonicalFishType}); null/
+     * blank means all 3. An unrecognised typeFilter is a 400, not a
+     * silently-empty page — the frontend only ever sends one of the 3
+     * canonical names or omits it, so this should never trigger in
+     * practice.
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductionLogResponse> fishFeedProductionHistory(String typeFilter, Pageable pageable) {
+        Collection<String> names;
+        if (typeFilter == null || typeFilter.isBlank()) {
+            names = FISH_FEED_TYPES;
+        } else {
+            String canonical = canonicalFishType(typeFilter);
+            if (canonical == null) {
+                throw new BadRequestException("\"" + typeFilter + "\" is not a fish feed type.");
+            }
+            names = List.of(canonical);
+        }
+        List<String> lowerNames = names.stream().map(String::toLowerCase).toList();
+        return productionRepository.findAllByFeedTypeNameLowerIn(lowerNames, pageable)
                 .map(e -> ProductionLogResponse.from(e, isEditable(e.getOccurredAt())));
     }
 

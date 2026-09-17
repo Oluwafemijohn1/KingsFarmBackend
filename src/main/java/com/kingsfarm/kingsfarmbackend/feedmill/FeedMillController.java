@@ -153,6 +153,12 @@ public class FeedMillController {
         return service.productionSummary();
     }
 
+    /** Same shape as {@link #productionHistory}, filtered to the 3 fish feed types server-side — backs the Fish Feed Production History view on the Fish Feed Collection page. */
+    @GetMapping("/fish-feed/production")
+    public PageResponse<ProductionLogResponse> fishFeedProductionHistory(@RequestParam(required = false) String type, @PageableDefault(size = 10) Pageable pageable) {
+        return PageResponse.from(service.fishFeedProductionHistory(type, pageable));
+    }
+
     // ── Fish feed stock ───────────────────────────────────────────────────
 
     @GetMapping("/fish-feed")
