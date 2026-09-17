@@ -42,7 +42,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int LOGIN_WINDOW_LIMIT = 10;
-    private static final int GLOBAL_WINDOW_LIMIT = 120;
+    // 120/min looked generous in isolation but undercounted how chatty a
+    // single page actually is: loading one module tab (e.g. Whole Egg's
+    // Stock Overview) fires ~9-10 parallel calls (stock rows, per-category
+    // opening-stock lock status ×6, recent transactions, cross-module day-
+    // state), and this bucket is per-IP, not per-user — every person on the
+    // same office network shares it. A few staff clicking between modules
+    // within the same minute, or one person quickly comparing several tabs
+    // after a nav change, could realistically exceed 120 through entirely
+    // normal use. 400 keeps the same backstop-against-actual-abuse intent
+    // (a real flood still trips it fast) while giving normal multi-user,
+    // multi-tab-load traffic real headroom.
+    private static final int GLOBAL_WINDOW_LIMIT = 400;
     private static final long WINDOW_MILLIS = 60_000;
     private static final String LOGIN_PATH = "/api/v1/auth/login";
 
