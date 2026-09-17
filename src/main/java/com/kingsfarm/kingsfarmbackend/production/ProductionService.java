@@ -16,6 +16,7 @@ import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow;
 import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCatOpeningRequest;
+import com.kingsfarm.kingsfarmbackend.production.dto.UpdateClassifyFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCrackFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdatePenEntryRequest;
 import com.kingsfarm.kingsfarmbackend.crackegg.CrackEggService;
@@ -231,6 +232,26 @@ public class ProductionService {
         if (request.crackRoughOpen() != null) state.setCrackRoughOpen(request.crackRoughOpen());
         if (request.crackGoodProd() != null) state.setCrackGoodProd(request.crackGoodProd());
         if (request.crackRoughProd() != null) state.setCrackRoughProd(request.crackRoughProd());
+        stamp(state, username);
+        return dayStateRepository.save(state);
+    }
+
+    /**
+     * Splits Total Crack Use (received from Whole Egg) into Good/Rough —
+     * still writes to {@link ProductionDayState} (that's where the closing-
+     * stock math for both panels already lives, so it stays put rather than
+     * migrating tables), but this is the Crack Egg Manager's call, not
+     * Production's, hence the separate method/DTO/endpoint with its own
+     * role check ({@code @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")} on
+     * the controller) instead of folding it into updateCrackFields above.
+     */
+    @Audited(module = Mod.PRODUCTION, action = "Classify Crack Use")
+    @Transactional
+    public ProductionDayState updateClassifyFields(UpdateClassifyFieldsRequest request, String username) {
+        ProductionDayState state = getTodayDayState();
+        if (!isEditable(state.getEntryDate())) {
+            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+        }
         if (request.goodClassify() != null) state.setGoodClassify(request.goodClassify());
         if (request.roughClassify() != null) state.setRoughClassify(request.roughClassify());
         stamp(state, username);

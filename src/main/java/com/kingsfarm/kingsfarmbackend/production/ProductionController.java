@@ -61,7 +61,12 @@ public class ProductionController {
                 }));
     }
 
+    // Broadened past the class-level role list — the Crack Egg Manager's own
+    // page (CrackEggView's Classify section) reads this to show Total Crack
+    // Use and the current Good/Rough split before editing it via
+    // updateClassifyFields below.
     @GetMapping("/day-state/today")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
     public ProductionDayStateResponse getTodayDayState() {
         return service.toResponse(service.getTodayDayState());
     }
@@ -84,6 +89,18 @@ public class ProductionController {
     public ProductionDayStateResponse updateCrackFields(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                           @Valid @RequestBody UpdateCrackFieldsRequest request) {
         return service.toResponse(service.updateCrackFields(request, principal.username()));
+    }
+
+    // Classifying Total Crack Use into Good/Rough is the Crack Egg Manager's
+    // call, not Production's — CrackEggView.tsx's Classify section calls
+    // this, not ProductionView.tsx (which now shows the result read-only).
+    // Still writes to ProductionDayState (see ProductionService.updateClassifyFields's
+    // javadoc for why the data stays there).
+    @PatchMapping("/day-state/classify-fields")
+    @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
+    public ProductionDayStateResponse updateClassifyFields(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                             @Valid @RequestBody UpdateClassifyFieldsRequest request) {
+        return service.toResponse(service.updateClassifyFields(request, principal.username()));
     }
 
     @GetMapping("/day-state/history")
