@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -173,7 +174,16 @@ public class ProductionService {
 
     // ── Day state (Category Stock Summary + Crack Egg tab) ──────────────────
 
-    @Transactional
+    // REQUIRES_NEW rather than the default REQUIRED: this is a shared
+    // cross-module getOrCreate (CrackEggService.stockSummary() calls it from
+    // inside its own @Transactional(readOnly = true)), and REQUIRED would
+    // just join that caller's already-open transaction — which, once opened
+    // read-only, stays read-only for every method that joins it, proxy or
+    // not. The find-or-create write below would then hit "Connection is
+    // read-only" on the first call of a fresh day. REQUIRES_NEW always opens
+    // its own writable transaction regardless of the caller's, so this stays
+    // safe no matter who calls it or from what transactional context.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProductionDayState getTodayDayState() {
         LocalDate today = LocalDate.now();
         return dayStateRepository.findByEntryDate(today).orElseGet(() -> {

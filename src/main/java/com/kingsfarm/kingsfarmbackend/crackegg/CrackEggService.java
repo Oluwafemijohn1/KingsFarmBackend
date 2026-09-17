@@ -69,11 +69,25 @@ public class CrackEggService {
         });
     }
 
+    /**
+     * Read-only twin of {@link #state} — same reason as MortalityService's
+     * peekCategoryValue / FeedMillService's peekFishFeedStock: calling
+     * state() here would be a self-invocation that bypasses Spring's
+     * @Transactional proxy, so its write would run inside the caller's
+     * @Transactional(readOnly = true) instead and throw "Connection is
+     * read-only" the first time this is read before any Crack Egg action
+     * has ever been saved. Returns an unsaved, default-valued instance
+     * instead of ever writing from a read path.
+     */
+    private CrackEggState peekState() {
+        return stateRepository.findById(CrackEggState.SINGLETON_ID).orElseGet(CrackEggState::new);
+    }
+
     // ── Cross-module feed: Crack Egg → Production ───────────────────────────
 
     @Transactional(readOnly = true)
     public double goodGiftQty() {
-        return state().getGcGiftQty();
+        return peekState().getGcGiftQty();
     }
 
     @Transactional(readOnly = true)
@@ -85,7 +99,7 @@ public class CrackEggService {
 
     @Transactional(readOnly = true)
     public StockSummaryResponse stockSummary() {
-        CrackEggState s = state();
+        CrackEggState s = peekState();
         ProductionDayState prod = productionService.getTodayDayState();
         double gcProduced = prod.getCrackGoodProd();
         double gcReceived = prod.getGoodClassify();

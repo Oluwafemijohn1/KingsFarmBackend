@@ -485,9 +485,24 @@ public class FeedMillService {
                 .orElseGet(() -> fishFeedStockRepository.save(FishFeedStock.builder().type(type).build()));
     }
 
+    /**
+     * Read-only twin of {@link #fishFeedStock} — same reason as
+     * MortalityService's peekCategoryValue: {@code @Transactional} on a
+     * self-invoked method (called here via {@code this::}) never runs
+     * through Spring's proxy, so it executes inside the caller's
+     * {@code @Transactional(readOnly = true)} instead, and the
+     * "insert a default row" write throws "Connection is read-only" the
+     * first time a fresh database is queried. Returns an unsaved,
+     * default-valued instance instead of ever writing from a read path.
+     */
+    private FishFeedStock peekFishFeedStock(String type) {
+        return fishFeedStockRepository.findByType(type)
+                .orElseGet(() -> FishFeedStock.builder().type(type).build());
+    }
+
     @Transactional(readOnly = true)
     public List<FishFeedStock> listFishFeedStock() {
-        return FISH_FEED_TYPES.stream().map(this::fishFeedStock).toList();
+        return FISH_FEED_TYPES.stream().map(this::peekFishFeedStock).toList();
     }
 
     @Audited(module = Mod.FEED_MILL, action = "Update Opening Stock", detail = "'Fish Feed ' + #type + ' -> ' + #request.value()")
