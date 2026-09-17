@@ -36,7 +36,9 @@ public class GcSaleTransaction {
     @Column(nullable = false, length = 255)
     private String customer;
 
-    @Column(nullable = false, length = 64)
+    // No longer collected at entry (see CreateGcSaleRequest's javadoc) — kept
+    // nullable rather than dropped so existing historical rows still have it.
+    @Column(length = 64)
     private String state;
 
     // double, not int — a sale can be a fractional crate (e.g. 0.5, 1.5); see

@@ -346,7 +346,14 @@ public class FeedMillService {
         FeedType feedType = feedType(feedTypeId);
         List<FeedFormulationEntry> entries = formulationRepository.findAllByFeedType(feedType);
         List<RequirementRow> rows = new ArrayList<>();
-        boolean canProduce = qtyTons > 0;
+        // A feed type with no formulation entries yet (freshly added via "Add
+        // Feed Type", before anyone has filled in ingredient quantities) must
+        // NOT be producible — without the `!entries.isEmpty()` guard here,
+        // the loop below never runs, canProduce is never AND'ed with
+        // anything, and it stays vacuously true for any positive quantity.
+        // That let a brand-new, unconfigured feed type look "validated" and
+        // silently produce with zero ingredients deducted.
+        boolean canProduce = qtyTons > 0 && !entries.isEmpty();
         for (FeedFormulationEntry e : entries) {
             double needed = round1(e.getQtyPerTon() * qtyTons);
             double available = e.getIngredient().closing();
@@ -365,6 +372,9 @@ public class FeedMillService {
         }
         ProductionCheckResponse check = checkProduction(request.feedTypeId(), request.qtyTons());
         if (!check.canProduce()) {
+            if (check.requirements().isEmpty()) {
+                throw new BadRequestException("\"" + check.feedTypeName() + "\" has no formulation configured yet. Add ingredient quantities in Formulations before producing.");
+            }
             throw new BadRequestException("Insufficient ingredient stock. Resolve shortfalls before producing.");
         }
         FeedType feedType = feedType(request.feedTypeId());

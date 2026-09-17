@@ -13,10 +13,15 @@ import java.util.List;
  * CESaleTxn's "not calculated by the system." qty is a double, not int/@Min(1)
  * — a sale can be a fractional crate (0.5, 1.5, etc); "exclusive" 0 keeps the
  * same "must sell something positive" intent @Min(1) had.
+ * <p>
+ * state is no longer collected at entry (product-owner call: customer
+ * location added no value here, just an extra required field) — optional
+ * now, defaulted to "" server-side in CrackEggService.createSale when
+ * omitted. The column/DTO field stay for existing historical rows.
  */
 public record CreateGcSaleRequest(
         @NotBlank String customer,
-        @NotBlank String state,
+        String state,
         @DecimalMin(value = "0", inclusive = false) double qty,
         @Min(0) long price,
         @NotEmpty List<PaymentMethod> paymentMethods,

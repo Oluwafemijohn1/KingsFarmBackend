@@ -215,7 +215,7 @@ public class CrackEggService {
         long transfer = request.paymentMethods().contains(PaymentMethod.TRANSFER) ? request.transferAmount() : 0;
 
         GcSaleTransaction txn = GcSaleTransaction.builder()
-                .customer(request.customer()).state(request.state()).qty(request.qty()).price(request.price())
+                .customer(request.customer()).state(request.state() == null ? "" : request.state()).qty(request.qty()).price(request.price())
                 .paymentMethods(new HashSet<>(request.paymentMethods()))
                 .bank(request.paymentMethods().contains(PaymentMethod.TRANSFER) ? request.bank() : null)
                 .cashAmount(cash).transferAmount(transfer).amountPaid(cash + transfer)
