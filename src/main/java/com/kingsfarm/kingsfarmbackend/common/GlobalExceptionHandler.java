@@ -5,7 +5,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -40,8 +43,29 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.FORBIDDEN, ex.getMessage(), req, null);
     }
 
+    /**
+     * Both "no valid session at all" (missing/invalid/expired access token —
+     * JwtAuthenticationFilter left the SecurityContext anonymous) and "signed
+     * in, but this role can't touch this endpoint" (@PreAuthorize failing for
+     * a real, authenticated user) surface as the same AccessDeniedException
+     * from Spring Security's method security — there's no exception-type
+     * distinction between the two. But the frontend needs one: api.ts only
+     * treats a 401 as "try a silent refresh, then log out" (SessionExpiredError);
+     * a 403 it just shows as a plain error message and does nothing else.
+     * Sending 403 for an expired token meant a stale session showed a
+     * permanent "Could not load records" instead of bouncing to /login. So
+     * this checks the SecurityContext itself: no real (non-anonymous)
+     * Authentication present means the client needs to re-authenticate (401,
+     * triggers the refresh-then-logout flow); an actually-authenticated user
+     * hitting a role check they fail gets the real 403.
+     */
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest req) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean hasRealSession = auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken);
+        if (!hasRealSession) {
+            return build(HttpStatus.UNAUTHORIZED, "Your session has expired. Please sign in again.", req, null);
+        }
         return build(HttpStatus.FORBIDDEN, "You don't have permission to do that.", req, null);
     }
 

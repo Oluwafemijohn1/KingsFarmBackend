@@ -88,8 +88,28 @@ public class FeedMillService {
         return Math.round(v * 100) / 100.0;
     }
 
+    // Unit, Decimal & Ingredient Calculation spec: 1 tonne = 1,000 kg = 1,000,000 g.
+    // Grams is the canonical base so any unit converts to any other in one hop.
+    private static double toGrams(double value, String unit) {
+        if ("g".equalsIgnoreCase(unit)) return value;
+        if ("ton".equalsIgnoreCase(unit) || "tonne".equalsIgnoreCase(unit)) return value * 1_000_000.0;
+        return value * 1000.0; // kg (also the fallback for any unrecognized unit)
+    }
+
+    private static double fromGrams(double grams, String unit) {
+        if ("g".equalsIgnoreCase(unit)) return grams;
+        if ("ton".equalsIgnoreCase(unit) || "tonne".equalsIgnoreCase(unit)) return grams / 1_000_000.0;
+        return grams / 1000.0; // kg
+    }
+
+    /** Converts a quantity between any two of ton/kg/g while preserving the physical amount (e.g. 200 g == 0.2 kg). */
+    private static double convert(double value, String fromUnit, String toUnit) {
+        if (fromUnit == null || toUnit == null || fromUnit.equalsIgnoreCase(toUnit)) return value;
+        return fromGrams(toGrams(value, fromUnit), toUnit);
+    }
+
     private static double toKg(double value, String unit) {
-        return "g".equalsIgnoreCase(unit) ? value / 1000.0 : value;
+        return convert(value, unit, "kg");
     }
 
     // ── Ingredients ───────────────────────────────────────────────────────
@@ -162,10 +182,37 @@ public class FeedMillService {
         ingredientRepository.save(ingredient);
     }
 
+    /**
+     * Switching an ingredient's unit must preserve the physical quantity, not
+     * just relabel the raw number — 200 g must become 0.2 kg, not stay "200"
+     * now meaning 200 kg (Unit, Decimal & Ingredient Calculation spec:
+     * "system must recognise equivalent quantities"). Rescales the
+     * ingredient's own opening/added/used/min AND every feed type's
+     * qtyPerTon for this ingredient (FeedFormulationEntry stores qtyPerTon in
+     * the ingredient's own unit — see its javadoc), so a formulation entered
+     * as "0.2 kg per ton" reads back as "200 g per ton" after the switch,
+     * not silently as "0.2 g per ton". Formulation Change History rows are
+     * frozen snapshots of what was entered at the time and are intentionally
+     * left as-is, same as every other attribution/audit snapshot in this app.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Update Unit", detail = "'Ingredient ' + #name + ' -> ' + #request.unit()")
     @Transactional
     public void setIngredientUnit(String name, UpdateUnitRequest request, String username) {
         FeedIngredient ingredient = ingredient(name);
-        ingredient.setUnit(request.unit());
+        String oldUnit = ingredient.getUnit();
+        String newUnit = request.unit();
+        if (!oldUnit.equalsIgnoreCase(newUnit)) {
+            ingredient.setOpening(convert(ingredient.getOpening(), oldUnit, newUnit));
+            ingredient.setAdded(convert(ingredient.getAdded(), oldUnit, newUnit));
+            ingredient.setUsed(convert(ingredient.getUsed(), oldUnit, newUnit));
+            ingredient.setMin(convert(ingredient.getMin(), oldUnit, newUnit));
+            ingredient.setUnit(newUnit);
+            for (FeedFormulationEntry e : formulationRepository.findAllByIngredient(ingredient)) {
+                e.setQtyPerTon(convert(e.getQtyPerTon(), oldUnit, newUnit));
+                e.setLastSavedQtyPerTon(convert(e.getLastSavedQtyPerTon(), oldUnit, newUnit));
+                formulationRepository.save(e);
+            }
+        }
         touch(ingredient, username);
         ingredientRepository.save(ingredient);
     }
@@ -276,9 +323,15 @@ public class FeedMillService {
         return group;
     }
 
+    // Same LazyInitializationException shape as productionHistory() above —
+    // FeedFormulationHistoryGroup.feedType is a LAZY @ManyToOne, so the
+    // group→response mapping (which reads g.getFeedType().getName()) has to
+    // happen in here, before this transaction closes, not back in the
+    // controller.
     @Transactional(readOnly = true)
-    public Page<FeedFormulationHistoryGroup> formulationHistory(Long feedTypeId, Pageable pageable) {
-        return historyGroupRepository.findAllByFeedTypeOrderByOccurredAtDesc(feedType(feedTypeId), pageable);
+    public Page<FormulationHistoryGroupResponse> formulationHistory(Long feedTypeId, Pageable pageable) {
+        return historyGroupRepository.findAllByFeedTypeOrderByOccurredAtDesc(feedType(feedTypeId), pageable)
+                .map(g -> FormulationHistoryGroupResponse.from(g, formulationHistoryItems(g)));
     }
 
     @Transactional(readOnly = true)
@@ -400,9 +453,19 @@ public class FeedMillService {
         return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
     }
 
+    // Maps to the DTO here, inside the transaction, rather than handing the
+    // raw entity Page back to the controller to map — feedType is a LAZY
+    // @ManyToOne (see FeedProductionLogEntry), and open-in-view is off
+    // (application.yaml), so touching it after this method returns (i.e.
+    // once the session that could load it is already closed) throws
+    // LazyInitializationException. That surfaced as every Production
+    // History request coming back "Something went wrong" — a real 500,
+    // not a data problem; the summary tab worked because it never returns
+    // entities past its own transaction boundary in the first place.
     @Transactional(readOnly = true)
-    public Page<FeedProductionLogEntry> productionHistory(Pageable pageable) {
-        return productionRepository.findAllByOrderByOccurredAtDesc(pageable);
+    public Page<ProductionLogResponse> productionHistory(Pageable pageable) {
+        return productionRepository.findAllByOrderByOccurredAtDesc(pageable)
+                .map(e -> ProductionLogResponse.from(e, isEditable(e.getOccurredAt())));
     }
 
     @Transactional(readOnly = true)

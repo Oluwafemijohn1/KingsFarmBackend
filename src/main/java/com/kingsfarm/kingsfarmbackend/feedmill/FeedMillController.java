@@ -19,7 +19,7 @@ import java.util.List;
 /** Same role split as every other module: Administrator + Feed Mill Manager read, only Feed Mill Manager writes. */
 @RestController
 @RequestMapping("/api/v1/feed-mill")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'FEED_MILL_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'FEED_MILL_MANAGER')")
 public class FeedMillController {
 
     private final FeedMillService service;
@@ -115,8 +115,7 @@ public class FeedMillController {
     @GetMapping("/feed-types/{feedTypeId}/formulation/history")
     public PageResponse<FormulationHistoryGroupResponse> formulationHistory(@PathVariable Long feedTypeId,
                                                                               @PageableDefault(size = 10) Pageable pageable) {
-        return PageResponse.from(service.formulationHistory(feedTypeId, pageable)
-                .map(g -> FormulationHistoryGroupResponse.from(g, service.formulationHistoryItems(g))));
+        return PageResponse.from(service.formulationHistory(feedTypeId, pageable));
     }
 
     // ── Feed production ───────────────────────────────────────────────────
@@ -146,8 +145,7 @@ public class FeedMillController {
 
     @GetMapping("/production")
     public PageResponse<ProductionLogResponse> productionHistory(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.productionHistory(pageable)
-                .map(e -> ProductionLogResponse.from(e, service.isEditable(e.getOccurredAt()))));
+        return PageResponse.from(service.productionHistory(pageable));
     }
 
     @GetMapping("/production/summary")

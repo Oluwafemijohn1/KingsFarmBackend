@@ -8,4 +8,7 @@ import java.util.Optional;
 public interface FeedFormulationEntryRepository extends JpaRepository<FeedFormulationEntry, Long> {
     List<FeedFormulationEntry> findAllByFeedType(FeedType feedType);
     Optional<FeedFormulationEntry> findByFeedTypeAndIngredient(FeedType feedType, FeedIngredient ingredient);
+
+    /** Every feed type's formulation row for one ingredient — used to rescale qtyPerTon across the board when that ingredient's unit changes (kg/g/ton). */
+    List<FeedFormulationEntry> findAllByIngredient(FeedIngredient ingredient);
 }

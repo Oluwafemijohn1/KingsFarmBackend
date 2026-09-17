@@ -16,18 +16,18 @@ public record WeSaleTransactionResponse(
         Instant occurredAt,
         int txnYear,
         List<SaleLineItemResponse> items,
-        long revenue,
+        double revenue,
         Set<PaymentMethod> paymentMethods,
         String bank,
         long cashAmount,
         long transferAmount,
         long amountPaid,
-        long credit,
-        long advance,
+        double credit,
+        double advance,
         String enteredBy,
         String updatedBy,
         boolean editable,
         /** The customer's balance immediately before this transaction (priorBalanceFor in WholeEggView) — positive = they owed, negative = they had an advance. */
-        long priorBalance
+        double priorBalance
 ) {
 }

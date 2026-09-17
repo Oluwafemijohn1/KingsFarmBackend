@@ -72,12 +72,12 @@ public class CrackEggService {
     // ── Cross-module feed: Crack Egg → Production ───────────────────────────
 
     @Transactional(readOnly = true)
-    public int goodGiftQty() {
+    public double goodGiftQty() {
         return state().getGcGiftQty();
     }
 
     @Transactional(readOnly = true)
-    public int goodSalesQty() {
+    public double goodSalesQty() {
         return saleRepository.sumQty();
     }
 
@@ -87,15 +87,15 @@ public class CrackEggService {
     public StockSummaryResponse stockSummary() {
         CrackEggState s = state();
         ProductionDayState prod = productionService.getTodayDayState();
-        int gcProduced = prod.getCrackGoodProd();
+        double gcProduced = prod.getCrackGoodProd();
         double gcReceived = prod.getGoodClassify();
-        int rcProduced = prod.getCrackRoughProd();
+        double rcProduced = prod.getCrackRoughProd();
         double rcReceived = prod.getRoughClassify();
 
-        int gcTotalSales = saleRepository.sumQty();
-        long gcRevenue = saleRepository.sumRevenue();
-        int gcClosing = (int) Math.round(s.getGcOpening() + gcProduced + gcReceived - s.getGcGiftQty() - gcTotalSales);
-        int rcClosing = (int) Math.round(s.getRcOpening() + rcProduced + rcReceived - s.getRcFeedMill());
+        double gcTotalSales = saleRepository.sumQty();
+        double gcRevenue = saleRepository.sumRevenue();
+        double gcClosing = s.getGcOpening() + gcProduced + gcReceived - s.getGcGiftQty() - gcTotalSales;
+        double rcClosing = s.getRcOpening() + rcProduced + rcReceived - s.getRcFeedMill();
 
         return new StockSummaryResponse(
                 s.getGcOpening(), lockService.isLocked(Mod.CRACK_EGG, "good"), gcProduced, gcReceived,
@@ -177,7 +177,7 @@ public class CrackEggService {
     public void setRcFeedMill(UpdateIntValueRequest request) {
         CrackEggState s = state();
         ProductionDayState prod = productionService.getTodayDayState();
-        int available = s.getRcOpening() + prod.getCrackRoughProd() + (int) Math.round(prod.getRoughClassify());
+        double available = s.getRcOpening() + prod.getCrackRoughProd() + prod.getRoughClassify();
         if (request.value() > available) {
             throw new BadRequestException("Cannot exceed available Rough Crack stock (" + available + ").");
         }
@@ -315,9 +315,9 @@ public class CrackEggService {
     }
 
     private Map<String, Object> reportRow(String periodLabel, List<GcSaleTransaction> sales, List<CrackEggGiftLogEntry> gifts) {
-        int goodSales = sales.stream().mapToInt(GcSaleTransaction::getQty).sum();
-        long goodRevenue = sales.stream().mapToLong(t -> (long) t.getQty() * t.getPrice()).sum();
-        int giftQty = gifts.stream().mapToInt(CrackEggGiftLogEntry::getQty).sum();
+        double goodSales = sales.stream().mapToDouble(GcSaleTransaction::getQty).sum();
+        double goodRevenue = sales.stream().mapToDouble(t -> t.getQty() * t.getPrice()).sum();
+        double giftQty = gifts.stream().mapToDouble(CrackEggGiftLogEntry::getQty).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
         row.put("goodSales", goodSales);

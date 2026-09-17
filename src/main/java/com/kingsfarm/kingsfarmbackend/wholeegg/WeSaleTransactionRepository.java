@@ -59,7 +59,7 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
     OutstandingTotals outstandingTotals();
 
     interface OutstandingTotals {
-        long getTotalCredit();
-        long getTotalAdvance();
+        double getTotalCredit();
+        double getTotalAdvance();
     }
 }

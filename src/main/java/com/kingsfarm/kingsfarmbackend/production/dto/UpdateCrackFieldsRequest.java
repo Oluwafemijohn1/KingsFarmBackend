@@ -1,14 +1,14 @@
 package com.kingsfarm.kingsfarmbackend.production.dto;
 
-import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.DecimalMin;
 
-/** All optional — null means "leave unchanged", same partial-update convention as Bird Stock. */
+/** All optional — null means "leave unchanged", same partial-update convention as Bird Stock. Double, not Integer/@Min — these are crate-based quantities and can be fractional. */
 public record UpdateCrackFieldsRequest(
-        @Min(0) Integer crackGoodOpen,
-        @Min(0) Integer crackRoughOpen,
-        @Min(0) Integer crackGoodProd,
-        @Min(0) Integer crackRoughProd,
-        @Min(0) Double goodClassify,
-        @Min(0) Double roughClassify
+        @DecimalMin("0") Double crackGoodOpen,
+        @DecimalMin("0") Double crackRoughOpen,
+        @DecimalMin("0") Double crackGoodProd,
+        @DecimalMin("0") Double crackRoughProd,
+        @DecimalMin("0") Double goodClassify,
+        @DecimalMin("0") Double roughClassify
 ) {
 }

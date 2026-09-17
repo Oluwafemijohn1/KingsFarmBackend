@@ -121,7 +121,7 @@ public class ProductionService {
         return birdPenRecordRepository.findByPenAndEntryDate(pen, date).map(BirdPenRecord::closing).orElse(0);
     }
 
-    public String productionPercent(int totalCrates, int birdClosing) {
+    public String productionPercent(double totalCrates, int birdClosing) {
         if (birdClosing == 0) {
             return "—";
         }
@@ -133,16 +133,16 @@ public class ProductionService {
         return entryDate.isEqual(LocalDate.now());
     }
 
-    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. */
+    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. Double: pen entries can be partial crates. */
     @Transactional(readOnly = true)
-    public java.util.Map<CatKey, Integer> catProdTotals(LocalDate date) {
-        java.util.Map<CatKey, Integer> totals = new java.util.EnumMap<>(CatKey.class);
+    public java.util.Map<CatKey, Double> catProdTotals(LocalDate date) {
+        java.util.Map<CatKey, Double> totals = new java.util.EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
-            totals.put(k, 0);
+            totals.put(k, 0.0);
         }
         for (ProductionPenEntry entry : penEntryRepository.findAllByEntryDate(date)) {
             for (CatKey k : CatKey.values()) {
-                totals.merge(k, entry.get(k), Integer::sum);
+                totals.merge(k, entry.get(k), Double::sum);
             }
         }
         return totals;
@@ -150,23 +150,23 @@ public class ProductionService {
 
     // ── Cross-module auto-feeds ──────────────────────────────────────────────
 
-    private int wholeEggCrackUse(CatKey category) {
+    private double wholeEggCrackUse(CatKey category) {
         return wholeEggService.salesCrackFor(category);
     }
 
-    private int wholeEggTotalSales(CatKey category) {
+    private double wholeEggTotalSales(CatKey category) {
         return wholeEggService.totalSalesFor(category);
     }
 
-    private int wholeEggGift(CatKey category) {
+    private double wholeEggGift(CatKey category) {
         return wholeEggService.giftFor(category);
     }
 
-    private int crackEggGoodGift() {
+    private double crackEggGoodGift() {
         return crackEggService.goodGiftQty();
     }
 
-    private int crackEggGoodSales() {
+    private double crackEggGoodSales() {
         return crackEggService.goodSalesQty();
     }
 
@@ -181,8 +181,8 @@ public class ProductionService {
             if (previous != null) {
                 LocalDate prevDate = previous.getEntryDate();
                 for (CatKey k : CatKey.values()) {
-                    int prevProd = catProdTotals(prevDate).get(k);
-                    int prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
+                    double prevProd = catProdTotals(prevDate).get(k);
+                    double prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
                     builder = switch (k) {
                         case X_LARGE -> builder.catOpeningXl(prevClosing);
                         case LARGE -> builder.catOpeningLg(prevClosing);
@@ -192,8 +192,8 @@ public class ProductionService {
                         case WHITE -> builder.catOpeningWh(prevClosing);
                     };
                 }
-                int prevCrackGoodClosing = (int) Math.round(previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales());
-                int prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + (int) Math.round(previous.getRoughClassify());
+                double prevCrackGoodClosing = previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales();
+                double prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + previous.getRoughClassify();
                 builder = builder.crackGoodOpen(prevCrackGoodClosing).crackRoughOpen(prevCrackRoughClosing);
             }
             return dayStateRepository.save(builder.build());
@@ -248,16 +248,16 @@ public class ProductionService {
     @Transactional(readOnly = true)
     public ProductionDayStateResponse toResponse(ProductionDayState state) {
         LocalDate date = state.getEntryDate();
-        java.util.Map<CatKey, Integer> production = catProdTotals(date);
+        java.util.Map<CatKey, Double> production = catProdTotals(date);
 
         List<CategoryStockRow> rows = new java.util.ArrayList<>();
         for (CatKey k : CatKey.values()) {
-            int opening = state.catOpening(k);
-            int prod = production.get(k);
-            int crackUse = wholeEggCrackUse(k);
-            int sales = wholeEggTotalSales(k);
-            int gift = wholeEggGift(k);
-            int closing = opening + prod - crackUse - sales - gift;
+            double opening = state.catOpening(k);
+            double prod = production.get(k);
+            double crackUse = wholeEggCrackUse(k);
+            double sales = wholeEggTotalSales(k);
+            double gift = wholeEggGift(k);
+            double closing = opening + prod - crackUse - sales - gift;
             rows.add(new CategoryStockRow(k, opening, prod, crackUse, sales, gift, closing, lockService.isLocked(Mod.PRODUCTION, k.wire())));
         }
 
@@ -268,16 +268,16 @@ public class ProductionService {
         double classifyTotal = state.getGoodClassify() + state.getRoughClassify();
         boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
 
-        int giftAuto = crackEggGoodGift();
-        int salesAuto = crackEggGoodSales();
+        double giftAuto = crackEggGoodGift();
+        double salesAuto = crackEggGoodSales();
         double crackGoodClosing = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify() - giftAuto - salesAuto;
-        int crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + (int) Math.round(state.getRoughClassify());
+        double crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
 
         return new ProductionDayStateResponse(
                 date, rows,
                 state.getCrackGoodOpen(), state.getCrackRoughOpen(), state.getCrackGoodProd(), state.getCrackRoughProd(),
                 state.getGoodClassify(), state.getRoughClassify(),
-                (int) Math.round(totalCrackFromWhole), classifyTotal, mismatch,
+                totalCrackFromWhole, classifyTotal, mismatch,
                 giftAuto, salesAuto, crackGoodClosing, crackRoughClosing,
                 state.getEnteredBy(), state.getUpdatedBy(), isEditable(date)
         );
@@ -342,10 +342,10 @@ public class ProductionService {
     }
 
     private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod) {
-        int xl = entries.stream().mapToInt(ProductionPenEntry::getQtyXl).sum();
-        int lg = entries.stream().mapToInt(ProductionPenEntry::getQtyLg).sum();
-        int md = entries.stream().mapToInt(ProductionPenEntry::getQtyMd).sum();
-        int crates = entries.stream().mapToInt(ProductionPenEntry::total).sum();
+        double xl = entries.stream().mapToDouble(ProductionPenEntry::getQtyXl).sum();
+        double lg = entries.stream().mapToDouble(ProductionPenEntry::getQtyLg).sum();
+        double md = entries.stream().mapToDouble(ProductionPenEntry::getQtyMd).sum();
+        double crates = entries.stream().mapToDouble(ProductionPenEntry::total).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
         row.put("crates", crates);

@@ -74,17 +74,35 @@ public class MortalityService {
 
     // ── Category values (opening + live gift total) ─────────────────────────
 
+    private static int defaultOpeningFor(MortCat category) {
+        return switch (category) {
+            case GOOD -> GOOD_OPENING_DEFAULT;
+            case DRY -> DRY_OPENING_DEFAULT;
+            case RUNT -> RUNT_OPENING_DEFAULT;
+            case GREEN -> GREEN_OPENING_DEFAULT;
+            case PM_REJECT -> PM_REJECT_OPENING_DEFAULT;
+        };
+    }
+
     private MortCategoryValue categoryValue(MortCat category) {
-        return categoryValueRepository.findByCategory(category).orElseGet(() -> {
-            int defaultOpening = switch (category) {
-                case GOOD -> GOOD_OPENING_DEFAULT;
-                case DRY -> DRY_OPENING_DEFAULT;
-                case RUNT -> RUNT_OPENING_DEFAULT;
-                case GREEN -> GREEN_OPENING_DEFAULT;
-                case PM_REJECT -> PM_REJECT_OPENING_DEFAULT;
-            };
-            return categoryValueRepository.save(MortCategoryValue.builder().category(category).opening(defaultOpening).build());
-        });
+        return categoryValueRepository.findByCategory(category).orElseGet(() ->
+                categoryValueRepository.save(MortCategoryValue.builder().category(category).opening(defaultOpeningFor(category)).build()));
+    }
+
+    /**
+     * Read-only twin of {@link #categoryValue} — same shape as
+     * {@link #peekTodayCatfishDisposal()} and for the same reason: Spring
+     * marks the JDBC connection itself read-only under
+     * {@code @Transactional(readOnly = true)}, so categoryValue()'s "insert
+     * a default row the first time this category is looked up" write throws
+     * "Connection is read-only" (SQLState S1009) the moment it runs inside a
+     * read-only transaction — exactly what was happening on every category
+     * on GET /mortality/stock for a fresh database. Returns an unsaved,
+     * default-valued instance instead of ever writing from a read path.
+     */
+    private MortCategoryValue peekCategoryValue(MortCat category) {
+        return categoryValueRepository.findByCategory(category)
+                .orElseGet(() -> MortCategoryValue.builder().category(category).opening(defaultOpeningFor(category)).build());
     }
 
     @Audited(module = Mod.MORTALITY, action = "Update Opening Stock", detail = "#category + ' -> ' + #request.value()")
@@ -119,7 +137,7 @@ public class MortalityService {
     }
 
     private MortCategoryStockRow stockRow(MortCat category) {
-        MortCategoryValue value = categoryValue(category);
+        MortCategoryValue value = peekCategoryValue(category);
         int produced = producedToday(category);
         int sales = category.saleable() ? saleRepository.sumQtyByCategory(category) : 0;
         int gift = category.saleable() ? value.getGiftQty() : 0;
@@ -333,12 +351,12 @@ public class MortalityService {
 
     @Transactional(readOnly = true)
     public int greenAvailable() {
-        return categoryValue(MortCat.GREEN).getOpening() + producedToday(MortCat.GREEN);
+        return peekCategoryValue(MortCat.GREEN).getOpening() + producedToday(MortCat.GREEN);
     }
 
     @Transactional(readOnly = true)
     public int pmRejectAvailable() {
-        return categoryValue(MortCat.PM_REJECT).getOpening() + producedToday(MortCat.PM_REJECT);
+        return peekCategoryValue(MortCat.PM_REJECT).getOpening() + producedToday(MortCat.PM_REJECT);
     }
 
     // ── Shared ────────────────────────────────────────────────────────────

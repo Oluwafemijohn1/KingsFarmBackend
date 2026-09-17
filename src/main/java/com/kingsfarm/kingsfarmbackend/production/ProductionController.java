@@ -19,7 +19,7 @@ import java.util.List;
 /** Same role split as Bird Stock: Administrator + Production Manager can read, only Production Manager can write. */
 @RestController
 @RequestMapping("/api/v1/production")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'PRODUCTION_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER')")
 public class ProductionController {
 
     private final ProductionService service;
