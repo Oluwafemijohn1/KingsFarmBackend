@@ -1,6 +1,7 @@
 package com.kingsfarm.kingsfarmbackend.wholeegg.dto;
 
 import com.kingsfarm.kingsfarmbackend.common.PaymentMethod;
+import com.kingsfarm.kingsfarmbackend.wholeegg.VerificationStatus;
 import com.kingsfarm.kingsfarmbackend.wholeegg.WeSaleTxnType;
 
 import java.time.Instant;
@@ -28,6 +29,11 @@ public record WeSaleTransactionResponse(
         String updatedBy,
         boolean editable,
         /** The customer's balance immediately before this transaction (priorBalanceFor in WholeEggView) — positive = they owed, negative = they had an advance. */
-        double priorBalance
+        double priorBalance,
+        /** Payment Auditing (Whole Egg only) — UNREVIEWED until an Administrator checks the bank account. Only meaningful when paymentMethods contains TRANSFER. */
+        VerificationStatus verificationStatus,
+        String verificationRemark,
+        String verifiedBy,
+        Instant verifiedAt
 ) {
 }

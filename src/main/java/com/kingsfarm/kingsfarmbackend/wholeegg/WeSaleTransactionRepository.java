@@ -1,9 +1,11 @@
 package com.kingsfarm.kingsfarmbackend.wholeegg;
 
+import com.kingsfarm.kingsfarmbackend.common.PaymentMethod;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
@@ -34,6 +36,22 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
 
     /** Every SALE-type transaction in a half-open [start, end) instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
     List<WeSaleTransaction> findAllByTypeAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(WeSaleTxnType type, Instant start, Instant end);
+
+    /**
+     * Backs the Payment Auditing tab — only transactions paid (at least
+     * partly) by bank transfer, in a half-open [start, end) instant range,
+     * most recent first. An explicit MEMBER OF query rather than a derived
+     * "Containing" method name, matching this repo's house style of
+     * spelling out anything beyond a simple derived query (see
+     * findAllByFeedTypeNameLowerIn in the Feed Mill module for the same
+     * convention).
+     */
+    @Query("SELECT t FROM WeSaleTransaction t WHERE :method MEMBER OF t.paymentMethods " +
+            "AND t.occurredAt >= :start AND t.occurredAt < :end ORDER BY t.occurredAt DESC")
+    Page<WeSaleTransaction> findAllByPaymentMethodAndOccurredAtRange(@Param("method") PaymentMethod method,
+                                                                       @Param("start") Instant start,
+                                                                       @Param("end") Instant end,
+                                                                       Pageable pageable);
 
     /** Ranks customers by how recently they last bought — feeds the New Sale picker's "recent customers" shortlist before anyone types. */
     @Query("select t.customer.id as customerId, max(t.occurredAt) as lastAt from WeSaleTransaction t group by t.customer.id order by max(t.occurredAt) desc")

@@ -435,7 +435,8 @@ public class WholeEggService {
                 txn.getId(), txn.getCustomer().getId(), txn.getCustomerNameSnapshot(), txn.getState(),
                 txn.getType(), txn.getOccurredAt(), txn.getTxnYear(), items, revenue,
                 txn.getPaymentMethods(), txn.getBank(), txn.getCashAmount(), txn.getTransferAmount(), txn.getAmountPaid(),
-                txn.getCredit(), txn.getAdvance(), txn.getEnteredBy(), txn.getUpdatedBy(), isEditable(txn), priorBalanceFor(txn)
+                txn.getCredit(), txn.getAdvance(), txn.getEnteredBy(), txn.getUpdatedBy(), isEditable(txn), priorBalanceFor(txn),
+                txn.getVerificationStatus(), txn.getVerificationRemark(), txn.getVerifiedBy(), txn.getVerifiedAt()
         );
     }
 
@@ -455,6 +456,45 @@ public class WholeEggService {
             return transactionRepository.findAllByOrderByOccurredAtDesc(pageable);
         }
         return transactionRepository.findAllByTxnYearOrderByOccurredAtDesc(LocalDate.now().getYear(), pageable);
+    }
+
+    // ── Payment Auditing (Administrator-only, Whole Egg only) ──────────────
+
+    /**
+     * Transfer-only transactions in a half-open [start, end) instant range,
+     * most recent first — backs the Payment Auditing tab. Cash-only
+     * transactions never appear here, matching the feature's whole premise:
+     * cash is already confirmed at time of sale, only transfers need
+     * checking against the bank. Period navigation (Today/Week/Month/
+     * Quarter/Half-Year) is resolved to a concrete [start, end) range by the
+     * controller before it gets here, same idiom as the daily/monthly
+     * report endpoints.
+     */
+    @Transactional(readOnly = true)
+    public Page<WeSaleTransaction> transferTransactions(Instant start, Instant end, Pageable pageable) {
+        return transactionRepository.findAllByPaymentMethodAndOccurredAtRange(PaymentMethod.TRANSFER, start, end, pageable);
+    }
+
+    /**
+     * The admin's tick/cross + remark for one transfer payment. Guards
+     * against verifying a cash-only transaction even though the UI never
+     * offers one — the whole point of this field is "did the transfer
+     * land", which is meaningless for a payment that was never a transfer.
+     */
+    @Audited(module = Mod.WHOLE_EGG, action = "Verify Transfer Payment", type = LogType.AUDIT,
+            detail = "'Txn #' + #id + ': ' + #request.status()")
+    @Transactional
+    public WeSaleTransaction verifyTransaction(Long id, VerifyPaymentRequest request, String adminUsername) {
+        WeSaleTransaction txn = transactionRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Transaction not found."));
+        if (!txn.getPaymentMethods().contains(PaymentMethod.TRANSFER)) {
+            throw new BadRequestException("Only bank-transfer payments can be verified.");
+        }
+        txn.setVerificationStatus(request.status());
+        txn.setVerificationRemark(request.remark());
+        txn.setVerifiedBy(adminUsername);
+        txn.setVerifiedAt(Instant.now());
+        return transactionRepository.save(txn);
     }
 
     /** Farm-wide, all-time, not year-restricted — a customer's outstanding balance doesn't reset each year just because a manager's browsable history does. */

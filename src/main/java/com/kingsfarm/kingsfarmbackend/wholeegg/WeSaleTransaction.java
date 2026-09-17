@@ -102,6 +102,26 @@ public class WeSaleTransaction {
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
 
+    /**
+     * Payment Auditing (admin-only, Whole Egg only — see VerificationStatus).
+     * Meaningful only when paymentMethods contains TRANSFER; a cash-only
+     * transaction just sits at the UNREVIEWED default forever, unsurfaced.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", nullable = false, length = 16)
+    @Builder.Default
+    private VerificationStatus verificationStatus = VerificationStatus.UNREVIEWED;
+
+    /** Admin's free-text note, e.g. "System says Zenith, customer actually transferred to FCMB." */
+    @Column(name = "verification_remark", length = 500)
+    private String verificationRemark;
+
+    @Column(name = "verified_by", length = 64)
+    private String verifiedBy;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
     @PrePersist
     void onCreate() {
         if (occurredAt == null) {

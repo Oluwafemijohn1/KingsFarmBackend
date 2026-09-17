@@ -2,6 +2,7 @@ package com.kingsfarm.kingsfarmbackend.wholeegg;
 
 import com.kingsfarm.kingsfarmbackend.common.CatKey;
 import com.kingsfarm.kingsfarmbackend.common.PageResponse;
+import com.kingsfarm.kingsfarmbackend.common.reports.ReportPeriods;
 import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.security.AuthenticatedPrincipal;
 import com.kingsfarm.kingsfarmbackend.wholeegg.dto.*;
@@ -14,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -140,6 +142,27 @@ public class WholeEggController {
     @GetMapping("/customers/outstanding-summary")
     public OutstandingBalanceResponse outstandingSummary() {
         return service.outstandingTotals();
+    }
+
+    // ── Payment Auditing (Administrator-only) ────────────────────────────
+
+    /** Transfer-only transactions for a date range (the Payment Auditing tab resolves Today/Week/Month/Quarter/Half-Year into start/end before calling this, same idiom as the report endpoints below). */
+    @GetMapping("/transactions/transfers")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public PageResponse<WeSaleTransactionResponse> transferTransactions(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                                                          @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                                                          @PageableDefault(size = 20) Pageable pageable) {
+        Instant rangeStart = ReportPeriods.startOfDay(start);
+        Instant rangeEnd = ReportPeriods.startOfNextDay(end);
+        return PageResponse.from(service.transferTransactions(rangeStart, rangeEnd, pageable).map(service::toResponse));
+    }
+
+    @PatchMapping("/transactions/{id}/verification")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public WeSaleTransactionResponse verifyTransaction(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                          @PathVariable Long id,
+                                                          @Valid @RequestBody VerifyPaymentRequest request) {
+        return service.toResponse(service.verifyTransaction(id, request, principal.username()));
     }
 
     // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────
