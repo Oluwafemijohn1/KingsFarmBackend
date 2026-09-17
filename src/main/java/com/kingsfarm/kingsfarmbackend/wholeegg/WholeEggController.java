@@ -20,7 +20,7 @@ import java.util.List;
 /** Same role split as every other module so far: Administrator + Whole Egg Manager can read, only Whole Egg Manager can write. */
 @RestController
 @RequestMapping("/api/v1/whole-egg")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'WHOLE_EGG_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'WHOLE_EGG_MANAGER')")
 public class WholeEggController {
 
     private final WholeEggService service;

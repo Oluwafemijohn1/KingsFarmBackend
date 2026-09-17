@@ -19,7 +19,7 @@ import java.util.List;
 /** Same role split as every other module: Administrator + Feed Mill Manager read, only Feed Mill Manager writes. */
 @RestController
 @RequestMapping("/api/v1/feed-mill")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'FEED_MILL_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'FEED_MILL_MANAGER')")
 public class FeedMillController {
 
     private final FeedMillService service;
