@@ -57,9 +57,7 @@ public class BirdStockController {
 
     @GetMapping("/records/today")
     public List<BirdPenRecordResponse> getTodayRecords() {
-        return service.getTodayRecords().stream()
-                .map(r -> BirdPenRecordResponse.from(r, service.isEditable(r), service.isOpeningLocked(r.getPen())))
-                .toList();
+        return service.getTodayRecords();
     }
 
     @PatchMapping("/records/{penId}")
@@ -67,8 +65,7 @@ public class BirdStockController {
     public BirdPenRecordResponse updateRecord(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                @PathVariable Long penId,
                                                @Valid @RequestBody UpdateBirdPenRecordRequest request) {
-        BirdPenRecord record = service.updateRecord(penId, request, principal.username());
-        return BirdPenRecordResponse.from(record, service.isEditable(record), service.isOpeningLocked(record.getPen()));
+        return service.updateRecord(penId, request, principal.username());
     }
 
     @PostMapping("/records/{penId}/lock-opening")
@@ -80,8 +77,7 @@ public class BirdStockController {
     @GetMapping("/records/history")
     public PageResponse<BirdPenRecordResponse> history(@RequestParam(required = false) Long penId,
                                                          @PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.history(penId, pageable)
-                .map(r -> BirdPenRecordResponse.from(r, service.isEditable(r), service.isOpeningLocked(r.getPen()))));
+        return PageResponse.from(service.history(penId, pageable));
     }
 
     // ── Reports (BACKEND_PLAN.md §8) ─────────────────────────────────────

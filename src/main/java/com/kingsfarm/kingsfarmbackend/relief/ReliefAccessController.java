@@ -34,23 +34,23 @@ public class ReliefAccessController {
 
     @GetMapping("/active")
     public List<ReliefGrantResponse> activeGrants() {
-        return service.activeGrants().stream().map(ReliefGrantResponse::from).toList();
+        return service.activeGrants();
     }
 
     @GetMapping("/past")
     public PageResponse<ReliefGrantResponse> pastGrants(@PageableDefault(size = 10) Pageable pageable) {
-        return PageResponse.from(service.pastGrants(pageable).map(ReliefGrantResponse::from));
+        return PageResponse.from(service.pastGrants(pageable));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ReliefGrantResponse grant(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                       @Valid @RequestBody CreateReliefGrantRequest request) {
-        return ReliefGrantResponse.from(service.grant(request, principal.username()));
+        return service.grant(request, principal.username());
     }
 
     @PostMapping("/{id}/revoke")
     public ReliefGrantResponse revoke(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id) {
-        return ReliefGrantResponse.from(service.revoke(id, principal.username()));
+        return service.revoke(id, principal.username());
     }
 }

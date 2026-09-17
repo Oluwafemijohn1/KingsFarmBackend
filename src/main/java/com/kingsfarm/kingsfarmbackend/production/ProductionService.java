@@ -15,6 +15,7 @@ import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow;
 import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
+import com.kingsfarm.kingsfarmbackend.production.dto.ProductionPenEntryResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCatOpeningRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateClassifyFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCrackFieldsRequest;
@@ -88,11 +89,22 @@ public class ProductionService {
 
     // ── Production by Pen ────────────────────────────────────────────────────
 
+    /**
+     * Returns response DTOs directly, resolved inside this transaction —
+     * ProductionPenEntry.pen is a LAZY @ManyToOne, and
+     * ProductionPenEntryResponse.from() dereferences pen.getName() (plus
+     * birdClosingFor(entry.getPen(), ...) below dereferences it a second
+     * time); with open-in-view disabled, doing either of those in the
+     * controller after the transaction closes throws
+     * LazyInitializationException (same bug class fixed in
+     * OpeningStockRequestService — see its javadoc).
+     */
     @Transactional
-    public List<ProductionPenEntry> getTodayPenEntries() {
+    public List<ProductionPenEntryResponse> getTodayPenEntries() {
         LocalDate today = LocalDate.now();
         return penRepository.findAllByActiveTrueOrderByNameAsc().stream()
                 .map(pen -> findOrCreateTodayEntry(pen, today))
+                .map(this::toPenEntryResponse)
                 .toList();
     }
 
@@ -101,9 +113,10 @@ public class ProductionService {
                 .orElseGet(() -> penEntryRepository.save(ProductionPenEntry.builder().pen(pen).entryDate(today).build()));
     }
 
+    /** See getTodayPenEntries()'s javadoc — same lazy-pen mapping-inside-transaction reasoning. */
     @Audited(module = Mod.PRODUCTION, action = "Save Production Entry", detail = "'Pen #' + #penId + ' / ' + #request.category() + ' = ' + #request.qty()")
     @Transactional
-    public ProductionPenEntry updatePenEntry(Long penId, UpdatePenEntryRequest request, String username) {
+    public ProductionPenEntryResponse updatePenEntry(Long penId, UpdatePenEntryRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
         ProductionPenEntry entry = findOrCreateTodayEntry(pen, today);
@@ -116,7 +129,15 @@ public class ProductionService {
         } else {
             entry.setUpdatedBy(username);
         }
-        return penEntryRepository.save(entry);
+        ProductionPenEntry saved = penEntryRepository.save(entry);
+        return toPenEntryResponse(saved);
+    }
+
+    /** Only ever called from within an already-@Transactional method above/below — never touches a detached entry. */
+    private ProductionPenEntryResponse toPenEntryResponse(ProductionPenEntry entry) {
+        int birdClosing = birdClosingFor(entry.getPen(), entry.getEntryDate());
+        String pct = productionPercent(entry.total(), birdClosing);
+        return ProductionPenEntryResponse.from(entry, birdClosing, pct, isEditable(entry.getEntryDate()));
     }
 
     public int birdClosingFor(Pen pen, LocalDate date) {
@@ -314,13 +335,17 @@ public class ProductionService {
         );
     }
 
+    /** See getTodayPenEntries()'s javadoc — mapped to the response DTO inside the transaction for the same reason. */
     @Transactional(readOnly = true)
-    public Page<ProductionPenEntry> penEntryHistory(Long penId, Pageable pageable) {
+    public Page<ProductionPenEntryResponse> penEntryHistory(Long penId, Pageable pageable) {
+        Page<ProductionPenEntry> page;
         if (penId != null) {
             Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
-            return penEntryRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+            page = penEntryRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+        } else {
+            page = penEntryRepository.findAllByOrderByEntryDateDesc(pageable);
         }
-        return penEntryRepository.findAllByOrderByEntryDateDesc(pageable);
+        return page.map(this::toPenEntryResponse);
     }
 
     @Transactional(readOnly = true)

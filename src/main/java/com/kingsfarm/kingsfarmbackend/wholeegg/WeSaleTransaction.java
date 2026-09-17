@@ -106,9 +106,15 @@ public class WeSaleTransaction {
      * Payment Auditing (admin-only, Whole Egg only — see VerificationStatus).
      * Meaningful only when paymentMethods contains TRANSFER; a cash-only
      * transaction just sits at the UNREVIEWED default forever, unsurfaced.
+     * {@code columnDefinition} spells out an explicit SQL DEFAULT — belt and
+     * suspenders for {@code ddl-auto: update}: without it, the ALTER TABLE
+     * that adds this NOT NULL column to an already-populated table has no
+     * DEFAULT clause, and depending on the DB's SQL mode that can silently
+     * backfill existing rows with the type's implicit default (e.g. an
+     * empty string) rather than a real enum constant.
      */
     @Enumerated(EnumType.STRING)
-    @Column(name = "verification_status", nullable = false, length = 16)
+    @Column(name = "verification_status", nullable = false, length = 16, columnDefinition = "VARCHAR(16) DEFAULT 'UNREVIEWED'")
     @Builder.Default
     private VerificationStatus verificationStatus = VerificationStatus.UNREVIEWED;
 

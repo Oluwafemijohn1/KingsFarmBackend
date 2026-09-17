@@ -30,13 +30,7 @@ public class ProductionController {
 
     @GetMapping("/pen-entries/today")
     public List<ProductionPenEntryResponse> getTodayPenEntries() {
-        return service.getTodayPenEntries().stream()
-                .map(entry -> {
-                    int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-                    String pct = service.productionPercent(entry.total(), birdClosing);
-                    return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
-                })
-                .toList();
+        return service.getTodayPenEntries();
     }
 
     @PatchMapping("/pen-entries/{penId}")
@@ -44,21 +38,13 @@ public class ProductionController {
     public ProductionPenEntryResponse updatePenEntry(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                        @PathVariable Long penId,
                                                        @Valid @RequestBody UpdatePenEntryRequest request) {
-        ProductionPenEntry entry = service.updatePenEntry(penId, request, principal.username());
-        int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-        String pct = service.productionPercent(entry.total(), birdClosing);
-        return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
+        return service.updatePenEntry(penId, request, principal.username());
     }
 
     @GetMapping("/pen-entries/history")
     public PageResponse<ProductionPenEntryResponse> penEntryHistory(@RequestParam(required = false) Long penId,
                                                                       @PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.penEntryHistory(penId, pageable)
-                .map(entry -> {
-                    int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-                    String pct = service.productionPercent(entry.total(), birdClosing);
-                    return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
-                }));
+        return PageResponse.from(service.penEntryHistory(penId, pageable));
     }
 
     // Broadened past the class-level role list — the Crack Egg Manager's own

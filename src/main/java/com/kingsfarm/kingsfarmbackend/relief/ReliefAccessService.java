@@ -6,6 +6,7 @@ import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
 import com.kingsfarm.kingsfarmbackend.relief.dto.CreateReliefGrantRequest;
+import com.kingsfarm.kingsfarmbackend.relief.dto.ReliefGrantResponse;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
 import com.kingsfarm.kingsfarmbackend.user.Role;
 import com.kingsfarm.kingsfarmbackend.user.User;
@@ -40,14 +41,26 @@ public class ReliefAccessService {
         return userRepository.findAllByRoleNotAndActiveTrueOrderByFullNameAsc(Role.ADMINISTRATOR);
     }
 
+    /**
+     * Returns response DTOs directly, resolved inside this transaction —
+     * ReliefGrant.onLeaveUser/granteeUser are LAZY @ManyToOne, and
+     * ReliefGrantResponse.from() dereferences non-id properties on both
+     * (.getUsername(), .getFullName(), .getRole()); with open-in-view
+     * disabled, mapping this in the controller after the transaction closes
+     * throws LazyInitializationException (same bug class fixed in
+     * OpeningStockRequestService — see its javadoc).
+     */
     @Transactional(readOnly = true)
-    public List<ReliefGrant> activeGrants() {
-        return grantRepository.findAllByActiveTrueOrderByGrantedAtDesc();
+    public List<ReliefGrantResponse> activeGrants() {
+        return grantRepository.findAllByActiveTrueOrderByGrantedAtDesc().stream()
+                .map(ReliefGrantResponse::from)
+                .toList();
     }
 
+    /** See activeGrants()'s javadoc — same lazy-user mapping-inside-transaction reasoning. */
     @Transactional(readOnly = true)
-    public Page<ReliefGrant> pastGrants(Pageable pageable) {
-        return grantRepository.findAllByActiveFalseOrderByGrantedAtDesc(pageable);
+    public Page<ReliefGrantResponse> pastGrants(Pageable pageable) {
+        return grantRepository.findAllByActiveFalseOrderByGrantedAtDesc(pageable).map(ReliefGrantResponse::from);
     }
 
     /**
@@ -59,7 +72,7 @@ public class ReliefAccessService {
     @Audited(module = Mod.ADMIN, action = "Grant Relief Access", type = LogType.AUDIT,
             detail = "'On leave: ' + #request.onLeaveUserId() + ', Relieving: ' + #request.granteeUserId()")
     @Transactional
-    public ReliefGrant grant(CreateReliefGrantRequest request, String adminUsername) {
+    public ReliefGrantResponse grant(CreateReliefGrantRequest request, String adminUsername) {
         if (request.onLeaveUserId().equals(request.granteeUserId())) {
             throw new BadRequestException("The relieving officer can't cover for themselves.");
         }
@@ -81,20 +94,21 @@ public class ReliefAccessService {
                 .reason(request.reason() == null ? "" : request.reason().trim())
                 .grantedBy(adminUsername)
                 .build();
-        return grantRepository.save(grantEntity);
+        return ReliefGrantResponse.from(grantRepository.save(grantEntity));
     }
 
+    /** See activeGrants()'s javadoc — onLeaveUser is still a LAZY proxy here (never touched above), so it's resolved into the response inside the transaction too. */
     @Audited(module = Mod.ADMIN, action = "Revoke Relief Access", type = LogType.AUDIT, detail = "'Grant #' + #id")
     @Transactional
-    public ReliefGrant revoke(Long id, String adminUsername) {
+    public ReliefGrantResponse revoke(Long id, String adminUsername) {
         ReliefGrant grant = grantRepository.findById(id).orElseThrow(() -> new NotFoundException("Relief grant not found."));
-        if (!grant.isActive()) {
-            return grant;
+        if (grant.isActive()) {
+            grant.setActive(false);
+            grant.setRevokedAt(Instant.now());
+            grant.setRevokedBy(adminUsername);
+            grantRepository.save(grant);
         }
-        grant.setActive(false);
-        grant.setRevokedAt(Instant.now());
-        grant.setRevokedBy(adminUsername);
-        return grantRepository.save(grant);
+        return ReliefGrantResponse.from(grant);
     }
 
     /**

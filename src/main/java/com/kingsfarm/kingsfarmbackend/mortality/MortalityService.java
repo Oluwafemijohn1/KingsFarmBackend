@@ -163,11 +163,20 @@ public class MortalityService {
 
     // ── Pen mortality entry ──────────────────────────────────────────────────
 
+    /**
+     * Returns the response DTO directly, resolved inside this transaction —
+     * MortPenEntry.pen is a LAZY @ManyToOne, and MortPenEntryResponse.from()
+     * dereferences pen.getName(); with open-in-view disabled, mapping this
+     * in the controller after the transaction closes throws
+     * LazyInitializationException (same bug class fixed in
+     * OpeningStockRequestService — see its javadoc).
+     */
     @Transactional
-    public List<MortPenEntry> getTodayPenEntries() {
+    public List<MortPenEntryResponse> getTodayPenEntries() {
         LocalDate today = LocalDate.now();
         return penRepository.findAllByActiveTrueOrderByNameAsc().stream()
                 .map(pen -> findOrCreateTodayEntry(pen, today))
+                .map(e -> MortPenEntryResponse.from(e, isEditable(e.getEntryDate())))
                 .toList();
     }
 
@@ -176,9 +185,10 @@ public class MortalityService {
                 .orElseGet(() -> penEntryRepository.save(MortPenEntry.builder().pen(pen).entryDate(today).build()));
     }
 
+    /** See getTodayPenEntries()'s javadoc — same lazy-pen mapping-inside-transaction reasoning. */
     @Audited(module = Mod.MORTALITY, action = "Save Mortality Entry", detail = "'Pen #' + #penId + ' / ' + #request.category() + ' = ' + #request.qty()")
     @Transactional
-    public MortPenEntry updatePenEntry(Long penId, UpdateMortPenEntryRequest request, String username) {
+    public MortPenEntryResponse updatePenEntry(Long penId, UpdateMortPenEntryRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
         MortPenEntry entry = findOrCreateTodayEntry(pen, today);
@@ -191,7 +201,8 @@ public class MortalityService {
         } else {
             entry.setUpdatedBy(username);
         }
-        return penEntryRepository.save(entry);
+        MortPenEntry saved = penEntryRepository.save(entry);
+        return MortPenEntryResponse.from(saved, isEditable(saved.getEntryDate()));
     }
 
     public boolean isEditable(LocalDate entryDate) {

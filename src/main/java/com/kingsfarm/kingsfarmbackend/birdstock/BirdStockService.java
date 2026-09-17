@@ -1,6 +1,7 @@
 package com.kingsfarm.kingsfarmbackend.birdstock;
 
 import com.kingsfarm.kingsfarmbackend.audit.Audited;
+import com.kingsfarm.kingsfarmbackend.birdstock.dto.BirdPenRecordResponse;
 import com.kingsfarm.kingsfarmbackend.birdstock.dto.CreatePenRequest;
 import com.kingsfarm.kingsfarmbackend.birdstock.dto.UpdateBirdPenRecordRequest;
 import com.kingsfarm.kingsfarmbackend.common.Mod;
@@ -82,9 +83,25 @@ public class BirdStockService {
         penRepository.save(pen);
     }
 
-    /** Finds-or-creates every active pen's row for today, carrying Opening forward from yesterday's Closing on first touch. */
+    /**
+     * Finds-or-creates every active pen's row for today, carrying Opening
+     * forward from yesterday's Closing on first touch — returns response
+     * DTOs directly, resolved inside this transaction. BirdPenRecord.pen is
+     * a LAZY @ManyToOne; both BirdPenRecordResponse.from() (pen.getName())
+     * and isOpeningLocked(Pen) (also pen.getName()) dereference it, and with
+     * open-in-view disabled, doing either in the controller after the
+     * transaction closes throws LazyInitializationException (same bug class
+     * fixed in OpeningStockRequestService — see its javadoc).
+     */
     @Transactional
-    public List<BirdPenRecord> getTodayRecords() {
+    public List<BirdPenRecordResponse> getTodayRecords() {
+        return getOrCreateTodayRecordEntities().stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /** Entity-level twin of getTodayRecords() — for internal callers (totalClosingToday()) that only need the numbers, not a lazy-pen-safe response DTO. */
+    private List<BirdPenRecord> getOrCreateTodayRecordEntities() {
         LocalDate today = LocalDate.now();
         return listPens(false).stream()
                 .map(pen -> findOrCreateTodayRecord(pen, today))
@@ -106,9 +123,10 @@ public class BirdStockService {
                 });
     }
 
+    /** See getTodayRecords()'s javadoc — same lazy-pen mapping-inside-transaction reasoning. */
     @Audited(module = Mod.BIRD_STOCK, action = "Save Record", detail = "'Pen #' + #penId + ' updated for ' + T(java.time.LocalDate).now()")
     @Transactional
-    public BirdPenRecord updateRecord(Long penId, UpdateBirdPenRecordRequest request, String username) {
+    public BirdPenRecordResponse updateRecord(Long penId, UpdateBirdPenRecordRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
         BirdPenRecord record = findOrCreateTodayRecord(pen, today);
@@ -148,7 +166,8 @@ public class BirdStockService {
         } else {
             record.setUpdatedBy(username);
         }
-        return recordRepository.save(record);
+        BirdPenRecord saved = recordRepository.save(record);
+        return toResponse(saved);
     }
 
     /** The manager's self-service "Done — Lock" action once they've finished correcting an approved-unlocked Opening Stock field. */
@@ -158,29 +177,36 @@ public class BirdStockService {
         lockService.lock(Mod.BIRD_STOCK, pen.getName());
     }
 
-    @Transactional(readOnly = true)
     public boolean isEditable(BirdPenRecord record) {
         return record.getEntryDate().isEqual(LocalDate.now());
     }
 
-    @Transactional(readOnly = true)
     public boolean isOpeningLocked(Pen pen) {
         return lockService.isLocked(Mod.BIRD_STOCK, pen.getName());
     }
 
+    /** Only ever called from within an already-@Transactional method above/below — never touches a detached record. */
+    private BirdPenRecordResponse toResponse(BirdPenRecord record) {
+        return BirdPenRecordResponse.from(record, isEditable(record), isOpeningLocked(record.getPen()));
+    }
+
+    /** See getTodayRecords()'s javadoc — mapped to the response DTO inside the transaction for the same reason. */
     @Transactional(readOnly = true)
-    public Page<BirdPenRecord> history(Long penId, Pageable pageable) {
+    public Page<BirdPenRecordResponse> history(Long penId, Pageable pageable) {
+        Page<BirdPenRecord> page;
         if (penId != null) {
             Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
-            return recordRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+            page = recordRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+        } else {
+            page = recordRepository.findAllByOrderByEntryDateDesc(pageable);
         }
-        return recordRepository.findAllByOrderByEntryDateDesc(pageable);
+        return page.map(this::toResponse);
     }
 
     /** Sum of every active pen's Closing today — what Production reads for its Bird Stock → Production auto-transfer (BACKEND_PLAN.md §6). */
     @Transactional(readOnly = true)
     public int totalClosingToday() {
-        return getTodayRecords().stream().mapToInt(BirdPenRecord::closing).sum();
+        return getOrCreateTodayRecordEntities().stream().mapToInt(BirdPenRecord::closing).sum();
     }
 
     /** Real closing total for one pen on one date — Production's Reports %-of-birds column reuses this instead of re-deriving. */
