@@ -24,6 +24,13 @@ public record LoginResponse(
         String roleLabel,
         boolean mustChangePassword,
         /** Roles this user currently covers via an active Relief Access grant — additive to {@code role}, see ReliefGrant's javadoc. */
-        List<Role> extraRoles
+        List<Role> extraRoles,
+        /**
+         * The admin-configured idle-logout threshold (SecuritySettings.sessionTimeoutMinutes),
+         * surfaced here rather than only via the Administrator-only
+         * {@code /api/v1/admin/security-settings} endpoint so every signed-in user's browser
+         * — not just admins — can size its idle-timeout timer to the real, current value.
+         */
+        int sessionTimeoutMinutes
 ) {
 }

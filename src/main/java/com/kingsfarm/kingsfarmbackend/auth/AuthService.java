@@ -126,7 +126,8 @@ public class AuthService {
                 accessToken, refreshToken,
                 user.getId(), user.getUsername(), user.getFullName(),
                 user.getRole(), user.getRole().label(),
-                user.isMustChangePassword(), extraRoles
+                user.isMustChangePassword(), extraRoles,
+                securitySettingsService.get().getSessionTimeoutMinutes()
         );
     }
 
@@ -229,7 +230,8 @@ public class AuthService {
         }
         List<Role> extraRoles = reliefAccessService.extraRolesFor(user);
         return new LoginResponse(null, null, user.getId(), user.getUsername(), user.getFullName(),
-                user.getRole(), user.getRole().label(), user.isMustChangePassword(), extraRoles);
+                user.getRole(), user.getRole().label(), user.isMustChangePassword(), extraRoles,
+                securitySettingsService.get().getSessionTimeoutMinutes());
     }
 
     @Transactional
