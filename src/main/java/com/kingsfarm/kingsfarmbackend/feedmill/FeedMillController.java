@@ -174,6 +174,13 @@ public class FeedMillController {
         service.lockFishFeedOpening(type);
     }
 
+    /** One-time repair endpoint — see {@link FeedMillService#recalculateFishFeedAdded}'s javadoc. Safe to call more than once. */
+    @PostMapping("/fish-feed/recalculate")
+    @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
+    public void recalculateFishFeedAdded() {
+        service.recalculateFishFeedAdded();
+    }
+
     // ── Fish feed collection ──────────────────────────────────────────────
 
     @PostMapping("/collections")

@@ -396,11 +396,34 @@ public class FeedMillService {
         }
     }
 
+    /**
+     * Matches a produced FeedType's name against the 3 fixed fish feed
+     * types, case- and whitespace-insensitively, returning the canonical
+     * form used to key FishFeedStock rows ("Fish Starter" etc.) — or null
+     * if it isn't a fish feed type at all. A FeedType is a plain
+     * user-typed name (see {@link #addFeedType}, which only dedupes
+     * case-insensitively — it doesn't normalize the stored casing), so a
+     * feed type saved as e.g. "Fish starter" must still be recognised
+     * here. An exact, case-sensitive check previously silently dropped the
+     * transfer for any fish feed type not typed with this exact
+     * capitalization — ingredients were still deducted, but the produced
+     * kg never reached the matching Fish Feed Collection card.
+     */
+    private String canonicalFishType(String feedTypeName) {
+        if (feedTypeName == null) return null;
+        String trimmed = feedTypeName.trim();
+        for (String canonical : FISH_FEED_TYPES) {
+            if (canonical.equalsIgnoreCase(trimmed)) return canonical;
+        }
+        return null;
+    }
+
     private void transferToFishFeed(String feedTypeName, double kg) {
-        if (!FISH_FEED_TYPES.contains(feedTypeName)) {
+        String canonical = canonicalFishType(feedTypeName);
+        if (canonical == null) {
             return;
         }
-        FishFeedStock stock = fishFeedStock(feedTypeName);
+        FishFeedStock stock = fishFeedStock(canonical);
         stock.setAdded(stock.getAdded() + kg);
         fishFeedStockRepository.save(stock);
     }
@@ -440,15 +463,15 @@ public class FeedMillService {
             ingredientRepository.save(ingredient);
         }
 
-        boolean oldFish = FISH_FEED_TYPES.contains(oldType.getName());
-        boolean newFish = FISH_FEED_TYPES.contains(newType.getName());
-        if (oldFish) {
-            FishFeedStock stock = fishFeedStock(oldType.getName());
+        String oldFishType = canonicalFishType(oldType.getName());
+        String newFishType = canonicalFishType(newType.getName());
+        if (oldFishType != null) {
+            FishFeedStock stock = fishFeedStock(oldFishType);
             stock.setAdded(stock.getAdded() - oldQty * 1000);
             fishFeedStockRepository.save(stock);
         }
-        if (newFish) {
-            FishFeedStock stock = fishFeedStock(newType.getName());
+        if (newFishType != null) {
+            FishFeedStock stock = fishFeedStock(newFishType);
             stock.setAdded(stock.getAdded() + newQty * 1000);
             fishFeedStockRepository.save(stock);
         }
@@ -513,6 +536,36 @@ public class FeedMillService {
     @Transactional(readOnly = true)
     public List<FishFeedStock> listFishFeedStock() {
         return FISH_FEED_TYPES.stream().map(this::peekFishFeedStock).toList();
+    }
+
+    /**
+     * One-time (and safe to re-run) repair for the case-sensitivity bug
+     * fixed in {@link #canonicalFishType}: before that fix, any fish feed
+     * type whose FeedType name wasn't typed with the exact canonical
+     * capitalization (e.g. a FeedType literally named "Fish starter")
+     * silently never had its produced kg added to the matching
+     * FishFeedStock row — ingredients were deducted, but "added" stayed
+     * wrong. This recomputes each of the 3 fish types' "added" field from
+     * scratch as the sum of every FeedProductionLogEntry that matches it
+     * case-insensitively, replacing whatever drifted value is currently
+     * stored. Collected/opening are untouched — only "added" is resynced.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Added Stock", type = LogType.AUDIT, detail = "'Resynced Added from full production history'")
+    @Transactional
+    public void recalculateFishFeedAdded() {
+        Map<String, Double> totalsKg = new LinkedHashMap<>();
+        for (String type : FISH_FEED_TYPES) totalsKg.put(type, 0.0);
+        for (FeedProductionLogEntry entry : productionRepository.findAll()) {
+            String canonical = canonicalFishType(entry.getFeedType().getName());
+            if (canonical != null) {
+                totalsKg.merge(canonical, entry.getQtyTons() * 1000, Double::sum);
+            }
+        }
+        for (Map.Entry<String, Double> e : totalsKg.entrySet()) {
+            FishFeedStock stock = fishFeedStock(e.getKey());
+            stock.setAdded(e.getValue());
+            fishFeedStockRepository.save(stock);
+        }
     }
 
     @Audited(module = Mod.FEED_MILL, action = "Update Opening Stock", detail = "'Fish Feed ' + #type + ' -> ' + #request.value()")
