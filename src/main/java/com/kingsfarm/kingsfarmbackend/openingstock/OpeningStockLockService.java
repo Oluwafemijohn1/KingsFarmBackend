@@ -19,12 +19,18 @@ public class OpeningStockLockService {
         this.repository = repository;
     }
 
-    /** No row (never touched) or an explicitly re-locked row both mean "locked" — matches the frontend's `!openingUnlocked[key]` default. */
+    /**
+     * No row means this scope has never been touched — it must be EDITABLE so a manager can
+     * enter the very first Opening Stock value. Once that first value is saved, the module
+     * service calls lock() explicitly, which is what actually locks it going forward (see
+     * setOpening()/lockOpening() in each module's service). An explicitly re-locked row means
+     * "locked" until an Administrator approves an OpeningStockRequest (unlock()).
+     */
     @Transactional(readOnly = true)
     public boolean isLocked(Mod module, String scope) {
         return repository.findByModuleAndScope(module, scope)
                 .map(state -> !state.isUnlocked())
-                .orElse(true);
+                .orElse(false);
     }
 
     /** Called once a manager finishes correcting an unlocked field, so it goes back to being carried-forward/locked for the next entry. */
