@@ -4,6 +4,7 @@ import com.kingsfarm.kingsfarmbackend.audit.Audited;
 import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
 import com.kingsfarm.kingsfarmbackend.openingstock.dto.CreateOpeningStockRequestRequest;
+import com.kingsfarm.kingsfarmbackend.openingstock.dto.OpeningStockRequestResponse;
 import com.kingsfarm.kingsfarmbackend.systemlog.LogType;
 import com.kingsfarm.kingsfarmbackend.user.User;
 import com.kingsfarm.kingsfarmbackend.user.UserRepository;
@@ -32,7 +33,7 @@ public class OpeningStockRequestService {
     @Audited(module = com.kingsfarm.kingsfarmbackend.common.Mod.ADMIN, action = "Opening Stock Unlock Requested",
             detail = "#request.module() + ' / ' + #request.scopeLabel() + ': ' + #request.reason()")
     @Transactional
-    public OpeningStockRequest create(CreateOpeningStockRequestRequest request, Long requestedByUserId) {
+    public OpeningStockRequestResponse create(CreateOpeningStockRequestRequest request, Long requestedByUserId) {
         User requestedBy = userRepository.findById(requestedByUserId)
                 .orElseThrow(() -> new NotFoundException("User not found."));
         OpeningStockRequest entity = OpeningStockRequest.builder()
@@ -43,14 +44,23 @@ public class OpeningStockRequestService {
                 .reason(request.reason())
                 .status(RequestStatus.PENDING)
                 .build();
-        return requestRepository.save(entity);
+        return OpeningStockRequestResponse.from(requestRepository.save(entity));
     }
 
+    /**
+     * Maps to the response DTO here, inside the transaction, rather than
+     * leaving that to the controller — requestedBy/resolvedBy are LAZY
+     * associations (see OpeningStockRequest), and with open-in-view
+     * disabled the Hibernate session is gone by the time the controller
+     * would otherwise touch them, throwing LazyInitializationException.
+     * Same convention as the Fish Feed Production History fix.
+     */
     @Transactional(readOnly = true)
-    public Page<OpeningStockRequest> list(RequestStatus statusFilter, Pageable pageable) {
-        return statusFilter != null
+    public Page<OpeningStockRequestResponse> list(RequestStatus statusFilter, Pageable pageable) {
+        Page<OpeningStockRequest> page = statusFilter != null
                 ? requestRepository.findAllByStatusOrderByRequestedAtDesc(statusFilter, pageable)
                 : requestRepository.findAllByOrderByRequestedAtDesc(pageable);
+        return page.map(OpeningStockRequestResponse::from);
     }
 
     @Transactional(readOnly = true)
@@ -61,7 +71,7 @@ public class OpeningStockRequestService {
     @Audited(module = com.kingsfarm.kingsfarmbackend.common.Mod.ADMIN, action = "Opening Stock Unlock Resolved", type = LogType.AUDIT,
             detail = "'Request #' + #requestId + ' -> ' + #decision")
     @Transactional
-    public OpeningStockRequest resolve(Long requestId, RequestStatus decision, Long resolvedByUserId) {
+    public OpeningStockRequestResponse resolve(Long requestId, RequestStatus decision, Long resolvedByUserId) {
         if (decision == RequestStatus.PENDING) {
             throw new BadRequestException("A request can only be resolved as APPROVED or DENIED.");
         }
@@ -81,6 +91,9 @@ public class OpeningStockRequestService {
         if (decision == RequestStatus.APPROVED) {
             lockService.unlock(request.getModule(), request.getScope());
         }
-        return request;
+        // requestedBy is still a LAZY proxy at this point (never touched
+        // above) — resolve it into the response here, inside the
+        // transaction, same reasoning as list() above.
+        return OpeningStockRequestResponse.from(request);
     }
 }
