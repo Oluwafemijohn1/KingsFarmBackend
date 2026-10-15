@@ -32,10 +32,10 @@ public class CrackEggState {
     // double, not int — Good/Rough Crack quantities can be fractional crates,
     // same as everywhere else in Production/Whole Egg/Crack Egg.
     @Column(name = "gc_opening", nullable = false)
-    private double gcOpening = 240;
+    private double gcOpening = 0;
 
     @Column(name = "gc_selling_price", nullable = false)
-    private long gcSellingPrice = 1800;
+    private long gcSellingPrice = 0;
 
     @Column(name = "gc_gift_qty", nullable = false)
     private double gcGiftQty = 0;
@@ -47,7 +47,7 @@ public class CrackEggState {
     private String gcGiftAuthorizer = "";
 
     @Column(name = "rc_opening", nullable = false)
-    private double rcOpening = 180;
+    private double rcOpening = 0;
 
     @Column(name = "rc_feed_mill", nullable = false)
     private double rcFeedMill = 0;

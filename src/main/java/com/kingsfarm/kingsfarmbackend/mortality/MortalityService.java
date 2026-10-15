@@ -42,11 +42,11 @@ import java.util.stream.Collectors;
 public class MortalityService {
 
     private static final ZoneId ZONE = ZoneId.systemDefault();
-    private static final int GOOD_OPENING_DEFAULT = 12;
-    private static final int DRY_OPENING_DEFAULT = 8;
-    private static final int RUNT_OPENING_DEFAULT = 5;
-    private static final int GREEN_OPENING_DEFAULT = 3;
-    private static final int PM_REJECT_OPENING_DEFAULT = 2;
+    private static final int GOOD_OPENING_DEFAULT = 0;
+    private static final int DRY_OPENING_DEFAULT = 0;
+    private static final int RUNT_OPENING_DEFAULT = 0;
+    private static final int GREEN_OPENING_DEFAULT = 0;
+    private static final int PM_REJECT_OPENING_DEFAULT = 0;
 
     private final PenRepository penRepository;
     private final MortPenEntryRepository penEntryRepository;
