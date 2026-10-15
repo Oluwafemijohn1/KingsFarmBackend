@@ -77,15 +77,15 @@ public class AuthService {
 
     @Transactional
     public LoginResponse login(LoginRequest request, String ipAddress) {
-        User user = userRepository.findByUsername(request.username()).orElse(null);
+        User user = userRepository.findByUsername(request.username().trim().toLowerCase()).orElse(null);
         if (user == null) {
             systemLogService.logAccess(null, request.username(), "Login", "Failed", ipAddress);
-            throw new InvalidCredentialsException("Incorrect username or password.");
+            throw new InvalidCredentialsException("Incorrect email or password. If you have not set your password yet, use the link in your invitation email.");
         }
 
         if (!user.isActive()) {
             systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Failed", ipAddress);
-            throw new InvalidCredentialsException("Incorrect username or password.");
+            throw new InvalidCredentialsException("Incorrect email or password. If you have not set your password yet, use the link in your invitation email.");
         }
 
         if (user.getLockedUntil() != null) {
@@ -101,7 +101,7 @@ public class AuthService {
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             registerFailedAttempt(user);
             systemLogService.logAccess(user.getId(), user.getUsername(), "Login", "Failed", ipAddress);
-            throw new InvalidCredentialsException("Incorrect username or password.");
+            throw new InvalidCredentialsException("Incorrect email or password. If you have not set your password yet, use the link in your invitation email.");
         }
 
         // Checked only after the password is confirmed correct — same order as the frontend's

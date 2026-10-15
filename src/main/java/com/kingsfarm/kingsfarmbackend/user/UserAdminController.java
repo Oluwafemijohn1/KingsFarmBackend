@@ -46,6 +46,11 @@ public class UserAdminController {
         return service.setActive(id, request.active(), principal.username());
     }
 
+    @PostMapping("/{id}/resend-invitation")
+    public ResetPasswordResponse resendInvitation(@PathVariable Long id) {
+        return service.resendInvitation(id);
+    }
+
     @PostMapping("/{id}/reset-password")
     public ResetPasswordResponse resetPassword(@PathVariable Long id) {
         return service.resetPassword(id);

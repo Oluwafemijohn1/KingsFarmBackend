@@ -24,23 +24,27 @@ public class UserAdminService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final ReliefAccessService reliefAccessService;
+    private final AccountSetupService accountSetupService;
 
-    public UserAdminService(UserRepository userRepository, PasswordEncoder passwordEncoder, ReliefAccessService reliefAccessService) {
+    public UserAdminService(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                            ReliefAccessService reliefAccessService, AccountSetupService accountSetupService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.reliefAccessService = reliefAccessService;
+        this.accountSetupService = accountSetupService;
     }
 
     @Audited(module = Mod.ADMIN, action = "Create User", type = LogType.AUDIT,
             detail = "'New user: ' + #request.username() + ' (' + #request.role() + ')'")
     @Transactional
     public CreateUserResponse createUser(CreateUserRequest request, String createdByUsername) {
-        if (userRepository.existsByUsername(request.username())) {
-            throw new ConflictException("That username is already taken.");
+        String email = request.username().trim().toLowerCase();
+        if (userRepository.existsByUsername(email)) {
+            throw new ConflictException("A user with that email already exists.");
         }
         String generatedPassword = PasswordGenerator.generate();
         User user = User.builder()
-                .username(request.username())
+                .username(email)
                 .fullName(request.fullName())
                 .role(request.role())
                 .passwordHash(passwordEncoder.encode(generatedPassword))
@@ -49,7 +53,8 @@ public class UserAdminService {
                 .createdBy(createdByUsername)
                 .build();
         user = userRepository.save(user);
-        return new CreateUserResponse(user.getId(), user.getUsername(), user.getFullName(), user.getRole(), user.getRole().label(), generatedPassword);
+        boolean sent = accountSetupService.issueAndSend(user, false);
+        return new CreateUserResponse(user.getId(), user.getUsername(), user.getFullName(), user.getRole(), user.getRole().label(), sent);
     }
 
     @Transactional(readOnly = true)
@@ -96,7 +101,18 @@ public class UserAdminService {
         user.setPasswordHash(passwordEncoder.encode(generatedPassword));
         user.setMustChangePassword(true);
         userRepository.save(user);
-        return new ResetPasswordResponse(user.getId(), user.getUsername(), generatedPassword);
+        boolean sent = accountSetupService.issueAndSend(user, true);
+        return new ResetPasswordResponse(user.getId(), user.getUsername(), sent);
+    }
+
+    /** Re-sends the verification / set-password email (new link; earlier links stop working). */
+    @Audited(module = Mod.ADMIN, action = "Resend Invitation", type = LogType.AUDIT,
+            detail = "'Invitation resent for user #' + #id")
+    @Transactional
+    public ResetPasswordResponse resendInvitation(Long id) {
+        User user = findOrThrow(id);
+        boolean sent = accountSetupService.issueAndSend(user, user.isEmailVerified());
+        return new ResetPasswordResponse(user.getId(), user.getUsername(), sent);
     }
 
     private User findOrThrow(Long id) {

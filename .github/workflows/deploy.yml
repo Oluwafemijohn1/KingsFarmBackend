@@ -63,6 +63,12 @@ jobs:
             echo "AUTH_COOKIE_SECURE=true"
             echo "BOOTSTRAP_ADMIN_USERNAME=${{ vars.BOOTSTRAP_ADMIN_USERNAME }}"
             echo "BOOTSTRAP_ADMIN_NAME=${{ vars.BOOTSTRAP_ADMIN_NAME }}"
+            echo "FRONTEND_BASE_URL=${{ vars.FRONTEND_BASE_URL }}"
+            echo "MAIL_HOST=${{ vars.MAIL_HOST }}"
+            echo "MAIL_PORT=${{ vars.MAIL_PORT }}"
+            echo "MAIL_FROM=${{ vars.MAIL_FROM }}"
+            echo "MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}"
+            echo "MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}"
             echo "SERVER_ADDRESS=127.0.0.1"
             echo "SPRING_JPA_SHOW_SQL=false"
           } > backend.env

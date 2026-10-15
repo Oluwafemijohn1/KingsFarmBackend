@@ -47,6 +47,11 @@ public class User {
     @Builder.Default
     private boolean active = true;
 
+    /** True once the user has clicked the emailed link and set their own password. The login ID (username) is their email address. */
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
     /** Set true whenever an admin (re)sets this account's password; cleared on a successful change-password call. */
     @Column(name = "must_change_password", nullable = false)
     @Builder.Default

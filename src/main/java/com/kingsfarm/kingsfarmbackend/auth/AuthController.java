@@ -24,10 +24,16 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthCookies authCookies;
+    private final com.kingsfarm.kingsfarmbackend.user.AccountSetupService accountSetupService;
+    private final com.kingsfarm.kingsfarmbackend.settings.SecuritySettingsService securitySettingsService;
 
-    public AuthController(AuthService authService, AuthCookies authCookies) {
+    public AuthController(AuthService authService, AuthCookies authCookies,
+                          com.kingsfarm.kingsfarmbackend.user.AccountSetupService accountSetupService,
+                          com.kingsfarm.kingsfarmbackend.settings.SecuritySettingsService securitySettingsService) {
         this.authService = authService;
         this.authCookies = authCookies;
+        this.accountSetupService = accountSetupService;
+        this.securitySettingsService = securitySettingsService;
     }
 
     @PostMapping("/login")
@@ -64,6 +70,22 @@ public class AuthController {
     public void changePassword(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                 @Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(principal.userId(), request);
+    }
+
+    /** Public: lets the set-password page show whose link this is. 400 if the link is bad/expired. */
+    @GetMapping("/verify-email")
+    public VerifyEmailInfo verifyEmailInfo(@RequestParam String token) {
+        var t = accountSetupService.inspect(token);
+        return new VerifyEmailInfo(t.getUser().getUsername(), t.getUser().getFullName(),
+                t.getPurpose() == com.kingsfarm.kingsfarmbackend.user.AccountTokenPurpose.RESET_PASSWORD,
+                securitySettingsService.get().getPasswordMinLength());
+    }
+
+    /** Public: redeems the emailed link - verifies the email and sets the user's own password. */
+    @PostMapping("/verify-email")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        accountSetupService.complete(request.token(), request.password());
     }
 
     /** Session-bootstrap check — see AuthService.currentSession's javadoc. Requires a valid access-token cookie; Spring Security returns 401 on its own otherwise. */

@@ -24,14 +24,17 @@ public class AdminBootstrapRunner implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
     private final String adminUsername;
     private final String adminFullName;
+    private final AccountSetupService accountSetupService;
 
     public AdminBootstrapRunner(UserRepository userRepository,
                                  PasswordEncoder passwordEncoder,
+                                 AccountSetupService accountSetupService,
                                  @Value("${app.bootstrap.admin-username}") String adminUsername,
                                  @Value("${app.bootstrap.admin-full-name}") String adminFullName) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
-        this.adminUsername = adminUsername;
+        this.accountSetupService = accountSetupService;
+        this.adminUsername = adminUsername.trim().toLowerCase();
         this.adminFullName = adminFullName;
     }
 
@@ -41,23 +44,22 @@ public class AdminBootstrapRunner implements CommandLineRunner {
             return;
         }
 
-        String generatedPassword = PasswordGenerator.generate();
+        // The login ID is the admin's real email. Nobody knows the placeholder
+        // password below; the admin sets their own via the emailed link
+        // (or the link printed in this log if SMTP is not configured yet).
         User admin = User.builder()
                 .username(adminUsername)
                 .fullName(adminFullName)
                 .role(Role.ADMINISTRATOR)
-                .passwordHash(passwordEncoder.encode(generatedPassword))
+                .passwordHash(passwordEncoder.encode(PasswordGenerator.generate()))
                 .active(true)
+                .emailVerified(false)
                 .mustChangePassword(true)
                 .createdBy(null)
                 .build();
-        userRepository.save(admin);
-
-        log.warn("=================================================================");
-        log.warn(" No users found — created the initial Administrator account.");
-        log.warn(" Username: {}", adminUsername);
-        log.warn(" Password: {}", generatedPassword);
-        log.warn(" This password is shown ONCE and is not recoverable — record it now.");
-        log.warn("=================================================================");
+        admin = userRepository.save(admin);
+        boolean sent = accountSetupService.issueAndSend(admin, false);
+        log.warn("No users found - created the initial Administrator {} ({}).", adminUsername,
+                sent ? "verification email sent" : "email NOT sent; use the setup link logged above");
     }
 }
