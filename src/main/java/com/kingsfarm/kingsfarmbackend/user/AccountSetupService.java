@@ -56,6 +56,18 @@ public class AccountSetupService {
         return emailService.sendAccountSetup(user, raw, passwordReset, tokenHours);
     }
 
+    /**
+     * Self-service "forgot password". Never reveals whether the address has an
+     * account: callers always get the same response. Active, verified users get
+     * a reset link; active-but-unverified users get a fresh invitation link.
+     */
+    @Transactional
+    public void requestReset(String email) {
+        users.findByUsername(email.trim().toLowerCase())
+                .filter(User::isActive)
+                .ifPresent(u -> issueAndSend(u, u.isEmailVerified()));
+    }
+
     /** Lets the setup page show who the link is for before they type a password. */
     @Transactional(readOnly = true)
     public AccountToken inspect(String rawToken) {

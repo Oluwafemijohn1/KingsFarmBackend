@@ -72,6 +72,13 @@ public class AuthController {
         authService.changePassword(principal.userId(), request);
     }
 
+    /** Public: emails a reset link if the address belongs to an account. Always 204 so account existence isn't revealed. */
+    @PostMapping("/forgot-password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        accountSetupService.requestReset(request.email());
+    }
+
     /** Public: lets the set-password page show whose link this is. 400 if the link is bad/expired. */
     @GetMapping("/verify-email")
     public VerifyEmailInfo verifyEmailInfo(@RequestParam String token) {

@@ -72,7 +72,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String ip = clientIp(request);
-        boolean isLogin = "POST".equalsIgnoreCase(request.getMethod()) && LOGIN_PATH.equals(request.getRequestURI());
+        boolean isLogin = "POST".equalsIgnoreCase(request.getMethod())
+                && (LOGIN_PATH.equals(request.getRequestURI()) || "/api/v1/auth/forgot-password".equals(request.getRequestURI()));
 
         if (isLogin && !allow(loginWindows, ip, LOGIN_WINDOW_LIMIT)) {
             log.warn("Rate limit hit (login window) — ip={} path={}", ip, request.getRequestURI());
