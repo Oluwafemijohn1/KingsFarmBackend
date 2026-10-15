@@ -19,7 +19,7 @@ import java.util.List;
 /** Same role split as Bird Stock: Administrator + Production Manager can read, only Production Manager can write. */
 @RestController
 @RequestMapping("/api/v1/production")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'PRODUCTION_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER')")
 public class ProductionController {
 
     private final ProductionService service;
@@ -30,13 +30,7 @@ public class ProductionController {
 
     @GetMapping("/pen-entries/today")
     public List<ProductionPenEntryResponse> getTodayPenEntries() {
-        return service.getTodayPenEntries().stream()
-                .map(entry -> {
-                    int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-                    String pct = service.productionPercent(entry.total(), birdClosing);
-                    return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
-                })
-                .toList();
+        return service.getTodayPenEntries();
     }
 
     @PatchMapping("/pen-entries/{penId}")
@@ -44,24 +38,21 @@ public class ProductionController {
     public ProductionPenEntryResponse updatePenEntry(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                        @PathVariable Long penId,
                                                        @Valid @RequestBody UpdatePenEntryRequest request) {
-        ProductionPenEntry entry = service.updatePenEntry(penId, request, principal.username());
-        int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-        String pct = service.productionPercent(entry.total(), birdClosing);
-        return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
+        return service.updatePenEntry(penId, request, principal.username());
     }
 
     @GetMapping("/pen-entries/history")
     public PageResponse<ProductionPenEntryResponse> penEntryHistory(@RequestParam(required = false) Long penId,
                                                                       @PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.penEntryHistory(penId, pageable)
-                .map(entry -> {
-                    int birdClosing = service.birdClosingFor(entry.getPen(), entry.getEntryDate());
-                    String pct = service.productionPercent(entry.total(), birdClosing);
-                    return ProductionPenEntryResponse.from(entry, birdClosing, pct, service.isEditable(entry.getEntryDate()));
-                }));
+        return PageResponse.from(service.penEntryHistory(penId, pageable));
     }
 
+    // Broadened past the class-level role list — the Crack Egg Manager's own
+    // page (CrackEggView's Classify section) reads this to show Total Crack
+    // Use and the current Good/Rough split before editing it via
+    // updateClassifyFields below.
     @GetMapping("/day-state/today")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
     public ProductionDayStateResponse getTodayDayState() {
         return service.toResponse(service.getTodayDayState());
     }
@@ -84,6 +75,18 @@ public class ProductionController {
     public ProductionDayStateResponse updateCrackFields(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                           @Valid @RequestBody UpdateCrackFieldsRequest request) {
         return service.toResponse(service.updateCrackFields(request, principal.username()));
+    }
+
+    // Classifying Total Crack Use into Good/Rough is the Crack Egg Manager's
+    // call, not Production's — CrackEggView.tsx's Classify section calls
+    // this, not ProductionView.tsx (which now shows the result read-only).
+    // Still writes to ProductionDayState (see ProductionService.updateClassifyFields's
+    // javadoc for why the data stays there).
+    @PatchMapping("/day-state/classify-fields")
+    @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
+    public ProductionDayStateResponse updateClassifyFields(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                             @Valid @RequestBody UpdateClassifyFieldsRequest request) {
+        return service.toResponse(service.updateClassifyFields(request, principal.username()));
     }
 
     @GetMapping("/day-state/history")

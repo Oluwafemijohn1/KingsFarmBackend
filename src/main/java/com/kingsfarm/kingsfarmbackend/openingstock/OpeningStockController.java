@@ -43,14 +43,14 @@ public class OpeningStockController {
     @ResponseStatus(HttpStatus.CREATED)
     public OpeningStockRequestResponse createRequest(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                        @Valid @RequestBody CreateOpeningStockRequestRequest request) {
-        return OpeningStockRequestResponse.from(requestService.create(request, principal.userId()));
+        return requestService.create(request, principal.userId());
     }
 
     @GetMapping("/requests")
     @PreAuthorize("hasRole('ADMINISTRATOR')")
     public PageResponse<OpeningStockRequestResponse> listRequests(@RequestParam(required = false) RequestStatus status,
                                                                     @PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(requestService.list(status, pageable).map(OpeningStockRequestResponse::from));
+        return PageResponse.from(requestService.list(status, pageable));
     }
 
     @PostMapping("/requests/{id}/resolve")
@@ -58,6 +58,6 @@ public class OpeningStockController {
     public OpeningStockRequestResponse resolve(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                 @PathVariable Long id,
                                                 @Valid @RequestBody ResolveOpeningStockRequestRequest request) {
-        return OpeningStockRequestResponse.from(requestService.resolve(id, request.decision(), principal.userId()));
+        return requestService.resolve(id, request.decision(), principal.userId());
     }
 }

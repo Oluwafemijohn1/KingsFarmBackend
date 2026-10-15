@@ -35,8 +35,9 @@ public class WeSaleLineItem {
     @Column(nullable = false, length = 8)
     private CatKey category;
 
+    /** Fractional crate quantities (0.5, 1.5, 2.5, ...) are valid and must be retained exactly — never rounded. */
     @Column(nullable = false)
-    private int qty;
+    private double qty;
 
     /** Snapshot of the price at sale time — never re-derived from the live wePrices catalog, so past revenue never drifts if prices change later. */
     @Column(nullable = false)

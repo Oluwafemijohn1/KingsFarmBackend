@@ -6,7 +6,7 @@ import java.time.Instant;
 
 public record GiftLogEntryResponse(
         Long id,
-        int qty,
+        double qty,
         String recipient,
         String authorizer,
         Instant occurredAt,

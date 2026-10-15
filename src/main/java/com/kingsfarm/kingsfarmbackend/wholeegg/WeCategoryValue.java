@@ -29,8 +29,14 @@ public class WeCategoryValue {
     @Column(nullable = false, length = 8)
     private CatKey category;
 
-    /** long covers both whole-crate quantities and Naira prices without needing two column types. */
+    /**
+     * double covers both fractional whole-crate quantities (OPENING/
+     * SALES_CRACK/GIFT — 0.5 crate = 15 eggs, etc., per the Crate Quantity &
+     * Conversion spec) and whole-Naira PRICE without needing two column
+     * types; PRICE is always entered as a whole number via the money-
+     * formatted input, so widening it here causes no behavior change there.
+     */
     @Column(nullable = false)
     @Builder.Default
-    private long value = 0;
+    private double value = 0;
 }

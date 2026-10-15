@@ -81,20 +81,52 @@ public class WeSaleTransaction {
     @Builder.Default
     private long amountPaid = 0;
 
-    /** Never hand-typed — always derived from amountPaid vs. what's owed (this transaction's own total plus whatever balance carried in). */
+    /**
+     * Never hand-typed — always derived from amountPaid vs. what's owed
+     * (this transaction's own total plus whatever balance carried in).
+     * double because totalDue can be fractional when a fractional crate
+     * quantity is sold (qty × price per crate), and that precision must be
+     * retained in the running balance rather than rounded away.
+     */
     @Column(nullable = false)
     @Builder.Default
-    private long credit = 0;
+    private double credit = 0;
 
     @Column(nullable = false)
     @Builder.Default
-    private long advance = 0;
+    private double advance = 0;
 
     @Column(name = "entered_by", length = 64)
     private String enteredBy;
 
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
+
+    /**
+     * Payment Auditing (admin-only, Whole Egg only — see VerificationStatus).
+     * Meaningful only when paymentMethods contains TRANSFER; a cash-only
+     * transaction just sits at the UNREVIEWED default forever, unsurfaced.
+     * {@code columnDefinition} spells out an explicit SQL DEFAULT — belt and
+     * suspenders for {@code ddl-auto: update}: without it, the ALTER TABLE
+     * that adds this NOT NULL column to an already-populated table has no
+     * DEFAULT clause, and depending on the DB's SQL mode that can silently
+     * backfill existing rows with the type's implicit default (e.g. an
+     * empty string) rather than a real enum constant.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", nullable = false, length = 16, columnDefinition = "VARCHAR(16) DEFAULT 'UNREVIEWED'")
+    @Builder.Default
+    private VerificationStatus verificationStatus = VerificationStatus.UNREVIEWED;
+
+    /** Admin's free-text note, e.g. "System says Zenith, customer actually transferred to FCMB." */
+    @Column(name = "verification_remark", length = 500)
+    private String verificationRemark;
+
+    @Column(name = "verified_by", length = 64)
+    private String verifiedBy;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
 
     @PrePersist
     void onCreate() {

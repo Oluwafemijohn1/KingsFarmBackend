@@ -15,7 +15,9 @@ import com.kingsfarm.kingsfarmbackend.common.reports.ReportTableResponse;
 import com.kingsfarm.kingsfarmbackend.openingstock.OpeningStockLockService;
 import com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow;
 import com.kingsfarm.kingsfarmbackend.production.dto.ProductionDayStateResponse;
+import com.kingsfarm.kingsfarmbackend.production.dto.ProductionPenEntryResponse;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCatOpeningRequest;
+import com.kingsfarm.kingsfarmbackend.production.dto.UpdateClassifyFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdateCrackFieldsRequest;
 import com.kingsfarm.kingsfarmbackend.production.dto.UpdatePenEntryRequest;
 import com.kingsfarm.kingsfarmbackend.crackegg.CrackEggService;
@@ -24,6 +26,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -86,11 +89,22 @@ public class ProductionService {
 
     // ── Production by Pen ────────────────────────────────────────────────────
 
+    /**
+     * Returns response DTOs directly, resolved inside this transaction —
+     * ProductionPenEntry.pen is a LAZY @ManyToOne, and
+     * ProductionPenEntryResponse.from() dereferences pen.getName() (plus
+     * birdClosingFor(entry.getPen(), ...) below dereferences it a second
+     * time); with open-in-view disabled, doing either of those in the
+     * controller after the transaction closes throws
+     * LazyInitializationException (same bug class fixed in
+     * OpeningStockRequestService — see its javadoc).
+     */
     @Transactional
-    public List<ProductionPenEntry> getTodayPenEntries() {
+    public List<ProductionPenEntryResponse> getTodayPenEntries() {
         LocalDate today = LocalDate.now();
         return penRepository.findAllByActiveTrueOrderByNameAsc().stream()
                 .map(pen -> findOrCreateTodayEntry(pen, today))
+                .map(this::toPenEntryResponse)
                 .toList();
     }
 
@@ -99,9 +113,10 @@ public class ProductionService {
                 .orElseGet(() -> penEntryRepository.save(ProductionPenEntry.builder().pen(pen).entryDate(today).build()));
     }
 
+    /** See getTodayPenEntries()'s javadoc — same lazy-pen mapping-inside-transaction reasoning. */
     @Audited(module = Mod.PRODUCTION, action = "Save Production Entry", detail = "'Pen #' + #penId + ' / ' + #request.category() + ' = ' + #request.qty()")
     @Transactional
-    public ProductionPenEntry updatePenEntry(Long penId, UpdatePenEntryRequest request, String username) {
+    public ProductionPenEntryResponse updatePenEntry(Long penId, UpdatePenEntryRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
         ProductionPenEntry entry = findOrCreateTodayEntry(pen, today);
@@ -114,14 +129,22 @@ public class ProductionService {
         } else {
             entry.setUpdatedBy(username);
         }
-        return penEntryRepository.save(entry);
+        ProductionPenEntry saved = penEntryRepository.save(entry);
+        return toPenEntryResponse(saved);
+    }
+
+    /** Only ever called from within an already-@Transactional method above/below — never touches a detached entry. */
+    private ProductionPenEntryResponse toPenEntryResponse(ProductionPenEntry entry) {
+        int birdClosing = birdClosingFor(entry.getPen(), entry.getEntryDate());
+        String pct = productionPercent(entry.total(), birdClosing);
+        return ProductionPenEntryResponse.from(entry, birdClosing, pct, isEditable(entry.getEntryDate()));
     }
 
     public int birdClosingFor(Pen pen, LocalDate date) {
         return birdPenRecordRepository.findByPenAndEntryDate(pen, date).map(BirdPenRecord::closing).orElse(0);
     }
 
-    public String productionPercent(int totalCrates, int birdClosing) {
+    public String productionPercent(double totalCrates, int birdClosing) {
         if (birdClosing == 0) {
             return "—";
         }
@@ -133,16 +156,16 @@ public class ProductionService {
         return entryDate.isEqual(LocalDate.now());
     }
 
-    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. */
+    /** Sum of every active pen's production today, per category — feeds Category Stock Summary's "Total Production" column. Double: pen entries can be partial crates. */
     @Transactional(readOnly = true)
-    public java.util.Map<CatKey, Integer> catProdTotals(LocalDate date) {
-        java.util.Map<CatKey, Integer> totals = new java.util.EnumMap<>(CatKey.class);
+    public java.util.Map<CatKey, Double> catProdTotals(LocalDate date) {
+        java.util.Map<CatKey, Double> totals = new java.util.EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
-            totals.put(k, 0);
+            totals.put(k, 0.0);
         }
         for (ProductionPenEntry entry : penEntryRepository.findAllByEntryDate(date)) {
             for (CatKey k : CatKey.values()) {
-                totals.merge(k, entry.get(k), Integer::sum);
+                totals.merge(k, entry.get(k), Double::sum);
             }
         }
         return totals;
@@ -150,29 +173,38 @@ public class ProductionService {
 
     // ── Cross-module auto-feeds ──────────────────────────────────────────────
 
-    private int wholeEggCrackUse(CatKey category) {
+    private double wholeEggCrackUse(CatKey category) {
         return wholeEggService.salesCrackFor(category);
     }
 
-    private int wholeEggTotalSales(CatKey category) {
+    private double wholeEggTotalSales(CatKey category) {
         return wholeEggService.totalSalesFor(category);
     }
 
-    private int wholeEggGift(CatKey category) {
+    private double wholeEggGift(CatKey category) {
         return wholeEggService.giftFor(category);
     }
 
-    private int crackEggGoodGift() {
+    private double crackEggGoodGift() {
         return crackEggService.goodGiftQty();
     }
 
-    private int crackEggGoodSales() {
+    private double crackEggGoodSales() {
         return crackEggService.goodSalesQty();
     }
 
     // ── Day state (Category Stock Summary + Crack Egg tab) ──────────────────
 
-    @Transactional
+    // REQUIRES_NEW rather than the default REQUIRED: this is a shared
+    // cross-module getOrCreate (CrackEggService.stockSummary() calls it from
+    // inside its own @Transactional(readOnly = true)), and REQUIRED would
+    // just join that caller's already-open transaction — which, once opened
+    // read-only, stays read-only for every method that joins it, proxy or
+    // not. The find-or-create write below would then hit "Connection is
+    // read-only" on the first call of a fresh day. REQUIRES_NEW always opens
+    // its own writable transaction regardless of the caller's, so this stays
+    // safe no matter who calls it or from what transactional context.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ProductionDayState getTodayDayState() {
         LocalDate today = LocalDate.now();
         return dayStateRepository.findByEntryDate(today).orElseGet(() -> {
@@ -181,8 +213,8 @@ public class ProductionService {
             if (previous != null) {
                 LocalDate prevDate = previous.getEntryDate();
                 for (CatKey k : CatKey.values()) {
-                    int prevProd = catProdTotals(prevDate).get(k);
-                    int prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
+                    double prevProd = catProdTotals(prevDate).get(k);
+                    double prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
                     builder = switch (k) {
                         case X_LARGE -> builder.catOpeningXl(prevClosing);
                         case LARGE -> builder.catOpeningLg(prevClosing);
@@ -192,8 +224,8 @@ public class ProductionService {
                         case WHITE -> builder.catOpeningWh(prevClosing);
                     };
                 }
-                int prevCrackGoodClosing = (int) Math.round(previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales());
-                int prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + (int) Math.round(previous.getRoughClassify());
+                double prevCrackGoodClosing = previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales();
+                double prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + previous.getRoughClassify();
                 builder = builder.crackGoodOpen(prevCrackGoodClosing).crackRoughOpen(prevCrackRoughClosing);
             }
             return dayStateRepository.save(builder.build());
@@ -231,6 +263,26 @@ public class ProductionService {
         if (request.crackRoughOpen() != null) state.setCrackRoughOpen(request.crackRoughOpen());
         if (request.crackGoodProd() != null) state.setCrackGoodProd(request.crackGoodProd());
         if (request.crackRoughProd() != null) state.setCrackRoughProd(request.crackRoughProd());
+        stamp(state, username);
+        return dayStateRepository.save(state);
+    }
+
+    /**
+     * Splits Total Crack Use (received from Whole Egg) into Good/Rough —
+     * still writes to {@link ProductionDayState} (that's where the closing-
+     * stock math for both panels already lives, so it stays put rather than
+     * migrating tables), but this is the Crack Egg Manager's call, not
+     * Production's, hence the separate method/DTO/endpoint with its own
+     * role check ({@code @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")} on
+     * the controller) instead of folding it into updateCrackFields above.
+     */
+    @Audited(module = Mod.PRODUCTION, action = "Classify Crack Use")
+    @Transactional
+    public ProductionDayState updateClassifyFields(UpdateClassifyFieldsRequest request, String username) {
+        ProductionDayState state = getTodayDayState();
+        if (!isEditable(state.getEntryDate())) {
+            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+        }
         if (request.goodClassify() != null) state.setGoodClassify(request.goodClassify());
         if (request.roughClassify() != null) state.setRoughClassify(request.roughClassify());
         stamp(state, username);
@@ -248,16 +300,16 @@ public class ProductionService {
     @Transactional(readOnly = true)
     public ProductionDayStateResponse toResponse(ProductionDayState state) {
         LocalDate date = state.getEntryDate();
-        java.util.Map<CatKey, Integer> production = catProdTotals(date);
+        java.util.Map<CatKey, Double> production = catProdTotals(date);
 
         List<CategoryStockRow> rows = new java.util.ArrayList<>();
         for (CatKey k : CatKey.values()) {
-            int opening = state.catOpening(k);
-            int prod = production.get(k);
-            int crackUse = wholeEggCrackUse(k);
-            int sales = wholeEggTotalSales(k);
-            int gift = wholeEggGift(k);
-            int closing = opening + prod - crackUse - sales - gift;
+            double opening = state.catOpening(k);
+            double prod = production.get(k);
+            double crackUse = wholeEggCrackUse(k);
+            double sales = wholeEggTotalSales(k);
+            double gift = wholeEggGift(k);
+            double closing = opening + prod - crackUse - sales - gift;
             rows.add(new CategoryStockRow(k, opening, prod, crackUse, sales, gift, closing, lockService.isLocked(Mod.PRODUCTION, k.wire())));
         }
 
@@ -268,28 +320,32 @@ public class ProductionService {
         double classifyTotal = state.getGoodClassify() + state.getRoughClassify();
         boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
 
-        int giftAuto = crackEggGoodGift();
-        int salesAuto = crackEggGoodSales();
+        double giftAuto = crackEggGoodGift();
+        double salesAuto = crackEggGoodSales();
         double crackGoodClosing = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify() - giftAuto - salesAuto;
-        int crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + (int) Math.round(state.getRoughClassify());
+        double crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
 
         return new ProductionDayStateResponse(
                 date, rows,
                 state.getCrackGoodOpen(), state.getCrackRoughOpen(), state.getCrackGoodProd(), state.getCrackRoughProd(),
                 state.getGoodClassify(), state.getRoughClassify(),
-                (int) Math.round(totalCrackFromWhole), classifyTotal, mismatch,
+                totalCrackFromWhole, classifyTotal, mismatch,
                 giftAuto, salesAuto, crackGoodClosing, crackRoughClosing,
                 state.getEnteredBy(), state.getUpdatedBy(), isEditable(date)
         );
     }
 
+    /** See getTodayPenEntries()'s javadoc — mapped to the response DTO inside the transaction for the same reason. */
     @Transactional(readOnly = true)
-    public Page<ProductionPenEntry> penEntryHistory(Long penId, Pageable pageable) {
+    public Page<ProductionPenEntryResponse> penEntryHistory(Long penId, Pageable pageable) {
+        Page<ProductionPenEntry> page;
         if (penId != null) {
             Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
-            return penEntryRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+            page = penEntryRepository.findAllByPenOrderByEntryDateDesc(pen, pageable);
+        } else {
+            page = penEntryRepository.findAllByOrderByEntryDateDesc(pageable);
         }
-        return penEntryRepository.findAllByOrderByEntryDateDesc(pageable);
+        return page.map(this::toPenEntryResponse);
     }
 
     @Transactional(readOnly = true)
@@ -342,10 +398,10 @@ public class ProductionService {
     }
 
     private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod) {
-        int xl = entries.stream().mapToInt(ProductionPenEntry::getQtyXl).sum();
-        int lg = entries.stream().mapToInt(ProductionPenEntry::getQtyLg).sum();
-        int md = entries.stream().mapToInt(ProductionPenEntry::getQtyMd).sum();
-        int crates = entries.stream().mapToInt(ProductionPenEntry::total).sum();
+        double xl = entries.stream().mapToDouble(ProductionPenEntry::getQtyXl).sum();
+        double lg = entries.stream().mapToDouble(ProductionPenEntry::getQtyLg).sum();
+        double md = entries.stream().mapToDouble(ProductionPenEntry::getQtyMd).sum();
+        double crates = entries.stream().mapToDouble(ProductionPenEntry::total).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
         row.put("crates", crates);

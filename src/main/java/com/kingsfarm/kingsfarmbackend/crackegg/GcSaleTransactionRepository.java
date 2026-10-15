@@ -13,10 +13,10 @@ public interface GcSaleTransactionRepository extends JpaRepository<GcSaleTransac
     List<GcSaleTransaction> findAllByOrderByOccurredAtDesc();
 
     @Query("select coalesce(sum(t.qty), 0) from GcSaleTransaction t")
-    int sumQty();
+    double sumQty();
 
     @Query("select coalesce(sum(t.qty * t.price), 0) from GcSaleTransaction t")
-    long sumRevenue();
+    double sumRevenue();
 
     /** Every sale in a half-open instant range — feeds the Reports daily/monthly endpoints (BACKEND_PLAN.md §8). */
     List<GcSaleTransaction> findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(Instant start, Instant end);

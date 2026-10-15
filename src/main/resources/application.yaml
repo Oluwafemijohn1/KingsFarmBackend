@@ -43,6 +43,27 @@ management:
       exposure:
         include: health
 
+# Previously unset entirely, which meant console-only output that never
+# survived an IDE restart — nothing was left to look at after the fact once
+# something broke and the run console was gone. logging.file.name writes to
+# BOTH the console and this file (Spring Boot's default Logback setup, with
+# its default 10MB roll-over/history — no custom logback-spring.xml needed).
+# Level split: our own code (com.kingsfarm.kingsfarmbackend) at INFO by
+# default — real problems (500s, rejected auth, rate-limit hits, refresh
+# failures) log at INFO/WARN/ERROR and always show; routine high-volume
+# noise (an access token expiring every JWT_ACCESS_MINUTES, which is
+# completely normal and is what triggers the frontend's silent refresh) is
+# DEBUG-only, so it's available without a code change (bump this to DEBUG
+# and restart) but doesn't drown out what's actually worth looking at.
+logging:
+  level:
+    root: INFO
+    com.kingsfarm.kingsfarmbackend: INFO
+  file:
+    name: logs/kingsfarm-backend.log
+  pattern:
+    file: "%d{yyyy-MM-dd HH:mm:ss} %-5level [%thread] %logger{36} - %msg%n"
+
 # App-specific security config. All three of these are read from environment
 # variables in real use (see BACKEND_PLAN.md §3/§11) — the fallback values
 # below only exist so the app runs out of the box on a first local checkout.

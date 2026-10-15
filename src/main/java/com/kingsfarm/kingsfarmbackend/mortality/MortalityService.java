@@ -74,17 +74,35 @@ public class MortalityService {
 
     // ── Category values (opening + live gift total) ─────────────────────────
 
+    private static int defaultOpeningFor(MortCat category) {
+        return switch (category) {
+            case GOOD -> GOOD_OPENING_DEFAULT;
+            case DRY -> DRY_OPENING_DEFAULT;
+            case RUNT -> RUNT_OPENING_DEFAULT;
+            case GREEN -> GREEN_OPENING_DEFAULT;
+            case PM_REJECT -> PM_REJECT_OPENING_DEFAULT;
+        };
+    }
+
     private MortCategoryValue categoryValue(MortCat category) {
-        return categoryValueRepository.findByCategory(category).orElseGet(() -> {
-            int defaultOpening = switch (category) {
-                case GOOD -> GOOD_OPENING_DEFAULT;
-                case DRY -> DRY_OPENING_DEFAULT;
-                case RUNT -> RUNT_OPENING_DEFAULT;
-                case GREEN -> GREEN_OPENING_DEFAULT;
-                case PM_REJECT -> PM_REJECT_OPENING_DEFAULT;
-            };
-            return categoryValueRepository.save(MortCategoryValue.builder().category(category).opening(defaultOpening).build());
-        });
+        return categoryValueRepository.findByCategory(category).orElseGet(() ->
+                categoryValueRepository.save(MortCategoryValue.builder().category(category).opening(defaultOpeningFor(category)).build()));
+    }
+
+    /**
+     * Read-only twin of {@link #categoryValue} — same shape as
+     * {@link #peekTodayCatfishDisposal()} and for the same reason: Spring
+     * marks the JDBC connection itself read-only under
+     * {@code @Transactional(readOnly = true)}, so categoryValue()'s "insert
+     * a default row the first time this category is looked up" write throws
+     * "Connection is read-only" (SQLState S1009) the moment it runs inside a
+     * read-only transaction — exactly what was happening on every category
+     * on GET /mortality/stock for a fresh database. Returns an unsaved,
+     * default-valued instance instead of ever writing from a read path.
+     */
+    private MortCategoryValue peekCategoryValue(MortCat category) {
+        return categoryValueRepository.findByCategory(category)
+                .orElseGet(() -> MortCategoryValue.builder().category(category).opening(defaultOpeningFor(category)).build());
     }
 
     @Audited(module = Mod.MORTALITY, action = "Update Opening Stock", detail = "#category + ' -> ' + #request.value()")
@@ -119,7 +137,7 @@ public class MortalityService {
     }
 
     private MortCategoryStockRow stockRow(MortCat category) {
-        MortCategoryValue value = categoryValue(category);
+        MortCategoryValue value = peekCategoryValue(category);
         int produced = producedToday(category);
         int sales = category.saleable() ? saleRepository.sumQtyByCategory(category) : 0;
         int gift = category.saleable() ? value.getGiftQty() : 0;
@@ -145,11 +163,20 @@ public class MortalityService {
 
     // ── Pen mortality entry ──────────────────────────────────────────────────
 
+    /**
+     * Returns the response DTO directly, resolved inside this transaction —
+     * MortPenEntry.pen is a LAZY @ManyToOne, and MortPenEntryResponse.from()
+     * dereferences pen.getName(); with open-in-view disabled, mapping this
+     * in the controller after the transaction closes throws
+     * LazyInitializationException (same bug class fixed in
+     * OpeningStockRequestService — see its javadoc).
+     */
     @Transactional
-    public List<MortPenEntry> getTodayPenEntries() {
+    public List<MortPenEntryResponse> getTodayPenEntries() {
         LocalDate today = LocalDate.now();
         return penRepository.findAllByActiveTrueOrderByNameAsc().stream()
                 .map(pen -> findOrCreateTodayEntry(pen, today))
+                .map(e -> MortPenEntryResponse.from(e, isEditable(e.getEntryDate())))
                 .toList();
     }
 
@@ -158,9 +185,10 @@ public class MortalityService {
                 .orElseGet(() -> penEntryRepository.save(MortPenEntry.builder().pen(pen).entryDate(today).build()));
     }
 
+    /** See getTodayPenEntries()'s javadoc — same lazy-pen mapping-inside-transaction reasoning. */
     @Audited(module = Mod.MORTALITY, action = "Save Mortality Entry", detail = "'Pen #' + #penId + ' / ' + #request.category() + ' = ' + #request.qty()")
     @Transactional
-    public MortPenEntry updatePenEntry(Long penId, UpdateMortPenEntryRequest request, String username) {
+    public MortPenEntryResponse updatePenEntry(Long penId, UpdateMortPenEntryRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
         MortPenEntry entry = findOrCreateTodayEntry(pen, today);
@@ -173,7 +201,8 @@ public class MortalityService {
         } else {
             entry.setUpdatedBy(username);
         }
-        return penEntryRepository.save(entry);
+        MortPenEntry saved = penEntryRepository.save(entry);
+        return MortPenEntryResponse.from(saved, isEditable(saved.getEntryDate()));
     }
 
     public boolean isEditable(LocalDate entryDate) {
@@ -333,12 +362,12 @@ public class MortalityService {
 
     @Transactional(readOnly = true)
     public int greenAvailable() {
-        return categoryValue(MortCat.GREEN).getOpening() + producedToday(MortCat.GREEN);
+        return peekCategoryValue(MortCat.GREEN).getOpening() + producedToday(MortCat.GREEN);
     }
 
     @Transactional(readOnly = true)
     public int pmRejectAvailable() {
-        return categoryValue(MortCat.PM_REJECT).getOpening() + producedToday(MortCat.PM_REJECT);
+        return peekCategoryValue(MortCat.PM_REJECT).getOpening() + producedToday(MortCat.PM_REJECT);
     }
 
     // ── Shared ────────────────────────────────────────────────────────────

@@ -2,9 +2,12 @@ package com.kingsfarm.kingsfarmbackend.security;
 
 import com.kingsfarm.kingsfarmbackend.user.Role;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -26,6 +29,8 @@ import java.util.UUID;
  */
 @Service
 public class JwtService {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
 
     private static final String CLAIM_USER_ID = "uid";
     private static final String CLAIM_ROLE = "role";
@@ -60,7 +65,19 @@ public class JwtService {
                 .compact();
     }
 
-    /** Returns null (rather than throwing) for any expired/malformed/invalid-signature token — callers just treat that as "not authenticated". */
+    /**
+     * Returns null (rather than throwing) for any expired/malformed/
+     * invalid-signature token — callers just treat that as "not
+     * authenticated", which is right for the response the client gets. But
+     * "why" used to be thrown away completely, so a burst of 401s was
+     * indistinguishable in the logs from a quiet afternoon: expired (the
+     * routine case — this is exactly what the frontend's silent-refresh
+     * flow exists to paper over, so DEBUG, not a real event) vs malformed/
+     * bad-signature/unsupported (rare, and worth a closer look — could be a
+     * tampered token, a client/server signing-key mismatch after a secret
+     * rotation, or a genuine bug) get logged at different levels so the
+     * routine case doesn't bury the ones actually worth noticing.
+     */
     public AuthenticatedPrincipal parse(String token) {
         try {
             Claims claims = Jwts.parser()
@@ -76,7 +93,11 @@ public class JwtService {
             List<Role> extraRoles = extraRoleNames == null ? List.of()
                     : extraRoleNames.stream().map(Role::valueOf).toList();
             return new AuthenticatedPrincipal(userId, claims.getSubject(), role, mustChangePassword, extraRoles);
+        } catch (ExpiredJwtException ex) {
+            log.debug("Access token expired for subject '{}' at {}", ex.getClaims() != null ? ex.getClaims().getSubject() : "?", ex.getClaims() != null ? ex.getClaims().getExpiration() : "?");
+            return null;
         } catch (JwtException | IllegalArgumentException ex) {
+            log.warn("Access token rejected — {}: {}", ex.getClass().getSimpleName(), ex.getMessage());
             return null;
         }
     }

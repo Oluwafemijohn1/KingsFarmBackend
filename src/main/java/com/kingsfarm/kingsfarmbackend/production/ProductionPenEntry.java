@@ -39,29 +39,33 @@ public class ProductionPenEntry {
     @Column(name = "entry_date", nullable = false)
     private java.time.LocalDate entryDate;
 
+    // double, not int: pen production is entered by crate, and a partial
+    // crate (e.g. 1.5) is a real, valid figure — see set()/get()/total()
+    // below and ProductionService's javadoc for how this precision carries
+    // through Category Stock Summary and the Reports tab.
     @Column(name = "qty_xl", nullable = false)
     @Builder.Default
-    private int qtyXl = 0;
+    private double qtyXl = 0;
 
     @Column(name = "qty_lg", nullable = false)
     @Builder.Default
-    private int qtyLg = 0;
+    private double qtyLg = 0;
 
     @Column(name = "qty_md", nullable = false)
     @Builder.Default
-    private int qtyMd = 0;
+    private double qtyMd = 0;
 
     @Column(name = "qty_sm", nullable = false)
     @Builder.Default
-    private int qtySm = 0;
+    private double qtySm = 0;
 
     @Column(name = "qty_pl", nullable = false)
     @Builder.Default
-    private int qtyPl = 0;
+    private double qtyPl = 0;
 
     @Column(name = "qty_wh", nullable = false)
     @Builder.Default
-    private int qtyWh = 0;
+    private double qtyWh = 0;
 
     @Column(name = "entered_by", length = 64)
     private String enteredBy;
@@ -69,7 +73,7 @@ public class ProductionPenEntry {
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
 
-    public int get(CatKey category) {
+    public double get(CatKey category) {
         return switch (category) {
             case X_LARGE -> qtyXl;
             case LARGE -> qtyLg;
@@ -80,7 +84,7 @@ public class ProductionPenEntry {
         };
     }
 
-    public void set(CatKey category, int value) {
+    public void set(CatKey category, double value) {
         switch (category) {
             case X_LARGE -> qtyXl = value;
             case LARGE -> qtyLg = value;
@@ -91,15 +95,15 @@ public class ProductionPenEntry {
         }
     }
 
-    public Map<CatKey, Integer> asMap() {
-        Map<CatKey, Integer> map = new EnumMap<>(CatKey.class);
+    public Map<CatKey, Double> asMap() {
+        Map<CatKey, Double> map = new EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
             map.put(k, get(k));
         }
         return map;
     }
 
-    public int total() {
+    public double total() {
         return qtyXl + qtyLg + qtyMd + qtySm + qtyPl + qtyWh;
     }
 }

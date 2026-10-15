@@ -6,6 +6,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -21,6 +23,7 @@ import java.io.IOException;
  */
 public class ApiKeyFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(ApiKeyFilter.class);
     private static final String HEADER = "X-API-Key";
 
     private final AppSecurityProperties properties;
@@ -37,6 +40,13 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         String provided = request.getHeader(HEADER);
         String expected = properties.getApiKey();
         if (expected == null || expected.isBlank() || provided == null || !constantTimeEquals(expected, provided)) {
+            // Never log the key values themselves (even on a mismatch) —
+            // just that a rejection happened, and where from. This filter
+            // runs before auth even starts, so this should be rare/never
+            // for real frontend traffic; a burst of these points at a
+            // client/server API-key mismatch (e.g. after a secret rotation)
+            // rather than anything to do with a user's session.
+            log.warn("Rejected request — missing/invalid X-API-Key. path={} ip={}", request.getRequestURI(), request.getRemoteAddr());
             writeUnauthorized(request, response);
             return;
         }

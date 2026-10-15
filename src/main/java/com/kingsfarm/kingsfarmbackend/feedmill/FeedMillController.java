@@ -19,7 +19,7 @@ import java.util.List;
 /** Same role split as every other module: Administrator + Feed Mill Manager read, only Feed Mill Manager writes. */
 @RestController
 @RequestMapping("/api/v1/feed-mill")
-@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'FEED_MILL_MANAGER')")
+@PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'FEED_MILL_MANAGER')")
 public class FeedMillController {
 
     private final FeedMillService service;
@@ -115,8 +115,7 @@ public class FeedMillController {
     @GetMapping("/feed-types/{feedTypeId}/formulation/history")
     public PageResponse<FormulationHistoryGroupResponse> formulationHistory(@PathVariable Long feedTypeId,
                                                                               @PageableDefault(size = 10) Pageable pageable) {
-        return PageResponse.from(service.formulationHistory(feedTypeId, pageable)
-                .map(g -> FormulationHistoryGroupResponse.from(g, service.formulationHistoryItems(g))));
+        return PageResponse.from(service.formulationHistory(feedTypeId, pageable));
     }
 
     // ── Feed production ───────────────────────────────────────────────────
@@ -146,13 +145,18 @@ public class FeedMillController {
 
     @GetMapping("/production")
     public PageResponse<ProductionLogResponse> productionHistory(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.productionHistory(pageable)
-                .map(e -> ProductionLogResponse.from(e, service.isEditable(e.getOccurredAt()))));
+        return PageResponse.from(service.productionHistory(pageable));
     }
 
     @GetMapping("/production/summary")
     public List<ProductionSummaryRow> productionSummary() {
         return service.productionSummary();
+    }
+
+    /** Same shape as {@link #productionHistory}, filtered to the 3 fish feed types server-side — backs the Fish Feed Production History view on the Fish Feed Collection page. */
+    @GetMapping("/fish-feed/production")
+    public PageResponse<ProductionLogResponse> fishFeedProductionHistory(@RequestParam(required = false) String type, @PageableDefault(size = 10) Pageable pageable) {
+        return PageResponse.from(service.fishFeedProductionHistory(type, pageable));
     }
 
     // ── Fish feed stock ───────────────────────────────────────────────────
@@ -174,6 +178,13 @@ public class FeedMillController {
     @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
     public void lockFishFeedOpening(@PathVariable String type) {
         service.lockFishFeedOpening(type);
+    }
+
+    /** One-time repair endpoint — see {@link FeedMillService#recalculateFishFeedAdded}'s javadoc. Safe to call more than once. */
+    @PostMapping("/fish-feed/recalculate")
+    @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
+    public void recalculateFishFeedAdded() {
+        service.recalculateFishFeedAdded();
     }
 
     // ── Fish feed collection ──────────────────────────────────────────────

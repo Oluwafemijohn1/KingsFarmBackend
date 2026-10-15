@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -88,8 +89,28 @@ public class FeedMillService {
         return Math.round(v * 100) / 100.0;
     }
 
+    // Unit, Decimal & Ingredient Calculation spec: 1 tonne = 1,000 kg = 1,000,000 g.
+    // Grams is the canonical base so any unit converts to any other in one hop.
+    private static double toGrams(double value, String unit) {
+        if ("g".equalsIgnoreCase(unit)) return value;
+        if ("ton".equalsIgnoreCase(unit) || "tonne".equalsIgnoreCase(unit)) return value * 1_000_000.0;
+        return value * 1000.0; // kg (also the fallback for any unrecognized unit)
+    }
+
+    private static double fromGrams(double grams, String unit) {
+        if ("g".equalsIgnoreCase(unit)) return grams;
+        if ("ton".equalsIgnoreCase(unit) || "tonne".equalsIgnoreCase(unit)) return grams / 1_000_000.0;
+        return grams / 1000.0; // kg
+    }
+
+    /** Converts a quantity between any two of ton/kg/g while preserving the physical amount (e.g. 200 g == 0.2 kg). */
+    private static double convert(double value, String fromUnit, String toUnit) {
+        if (fromUnit == null || toUnit == null || fromUnit.equalsIgnoreCase(toUnit)) return value;
+        return fromGrams(toGrams(value, fromUnit), toUnit);
+    }
+
     private static double toKg(double value, String unit) {
-        return "g".equalsIgnoreCase(unit) ? value / 1000.0 : value;
+        return convert(value, unit, "kg");
     }
 
     // ── Ingredients ───────────────────────────────────────────────────────
@@ -162,10 +183,37 @@ public class FeedMillService {
         ingredientRepository.save(ingredient);
     }
 
+    /**
+     * Switching an ingredient's unit must preserve the physical quantity, not
+     * just relabel the raw number — 200 g must become 0.2 kg, not stay "200"
+     * now meaning 200 kg (Unit, Decimal & Ingredient Calculation spec:
+     * "system must recognise equivalent quantities"). Rescales the
+     * ingredient's own opening/added/used/min AND every feed type's
+     * qtyPerTon for this ingredient (FeedFormulationEntry stores qtyPerTon in
+     * the ingredient's own unit — see its javadoc), so a formulation entered
+     * as "0.2 kg per ton" reads back as "200 g per ton" after the switch,
+     * not silently as "0.2 g per ton". Formulation Change History rows are
+     * frozen snapshots of what was entered at the time and are intentionally
+     * left as-is, same as every other attribution/audit snapshot in this app.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Update Unit", detail = "'Ingredient ' + #name + ' -> ' + #request.unit()")
     @Transactional
     public void setIngredientUnit(String name, UpdateUnitRequest request, String username) {
         FeedIngredient ingredient = ingredient(name);
-        ingredient.setUnit(request.unit());
+        String oldUnit = ingredient.getUnit();
+        String newUnit = request.unit();
+        if (!oldUnit.equalsIgnoreCase(newUnit)) {
+            ingredient.setOpening(convert(ingredient.getOpening(), oldUnit, newUnit));
+            ingredient.setAdded(convert(ingredient.getAdded(), oldUnit, newUnit));
+            ingredient.setUsed(convert(ingredient.getUsed(), oldUnit, newUnit));
+            ingredient.setMin(convert(ingredient.getMin(), oldUnit, newUnit));
+            ingredient.setUnit(newUnit);
+            for (FeedFormulationEntry e : formulationRepository.findAllByIngredient(ingredient)) {
+                e.setQtyPerTon(convert(e.getQtyPerTon(), oldUnit, newUnit));
+                e.setLastSavedQtyPerTon(convert(e.getLastSavedQtyPerTon(), oldUnit, newUnit));
+                formulationRepository.save(e);
+            }
+        }
         touch(ingredient, username);
         ingredientRepository.save(ingredient);
     }
@@ -276,9 +324,15 @@ public class FeedMillService {
         return group;
     }
 
+    // Same LazyInitializationException shape as productionHistory() above —
+    // FeedFormulationHistoryGroup.feedType is a LAZY @ManyToOne, so the
+    // group→response mapping (which reads g.getFeedType().getName()) has to
+    // happen in here, before this transaction closes, not back in the
+    // controller.
     @Transactional(readOnly = true)
-    public Page<FeedFormulationHistoryGroup> formulationHistory(Long feedTypeId, Pageable pageable) {
-        return historyGroupRepository.findAllByFeedTypeOrderByOccurredAtDesc(feedType(feedTypeId), pageable);
+    public Page<FormulationHistoryGroupResponse> formulationHistory(Long feedTypeId, Pageable pageable) {
+        return historyGroupRepository.findAllByFeedTypeOrderByOccurredAtDesc(feedType(feedTypeId), pageable)
+                .map(g -> FormulationHistoryGroupResponse.from(g, formulationHistoryItems(g)));
     }
 
     @Transactional(readOnly = true)
@@ -293,7 +347,14 @@ public class FeedMillService {
         FeedType feedType = feedType(feedTypeId);
         List<FeedFormulationEntry> entries = formulationRepository.findAllByFeedType(feedType);
         List<RequirementRow> rows = new ArrayList<>();
-        boolean canProduce = qtyTons > 0;
+        // A feed type with no formulation entries yet (freshly added via "Add
+        // Feed Type", before anyone has filled in ingredient quantities) must
+        // NOT be producible — without the `!entries.isEmpty()` guard here,
+        // the loop below never runs, canProduce is never AND'ed with
+        // anything, and it stays vacuously true for any positive quantity.
+        // That let a brand-new, unconfigured feed type look "validated" and
+        // silently produce with zero ingredients deducted.
+        boolean canProduce = qtyTons > 0 && !entries.isEmpty();
         for (FeedFormulationEntry e : entries) {
             double needed = round1(e.getQtyPerTon() * qtyTons);
             double available = e.getIngredient().closing();
@@ -312,6 +373,9 @@ public class FeedMillService {
         }
         ProductionCheckResponse check = checkProduction(request.feedTypeId(), request.qtyTons());
         if (!check.canProduce()) {
+            if (check.requirements().isEmpty()) {
+                throw new BadRequestException("\"" + check.feedTypeName() + "\" has no formulation configured yet. Add ingredient quantities in Formulations before producing.");
+            }
             throw new BadRequestException("Insufficient ingredient stock. Resolve shortfalls before producing.");
         }
         FeedType feedType = feedType(request.feedTypeId());
@@ -333,11 +397,34 @@ public class FeedMillService {
         }
     }
 
+    /**
+     * Matches a produced FeedType's name against the 3 fixed fish feed
+     * types, case- and whitespace-insensitively, returning the canonical
+     * form used to key FishFeedStock rows ("Fish Starter" etc.) — or null
+     * if it isn't a fish feed type at all. A FeedType is a plain
+     * user-typed name (see {@link #addFeedType}, which only dedupes
+     * case-insensitively — it doesn't normalize the stored casing), so a
+     * feed type saved as e.g. "Fish starter" must still be recognised
+     * here. An exact, case-sensitive check previously silently dropped the
+     * transfer for any fish feed type not typed with this exact
+     * capitalization — ingredients were still deducted, but the produced
+     * kg never reached the matching Fish Feed Collection card.
+     */
+    private String canonicalFishType(String feedTypeName) {
+        if (feedTypeName == null) return null;
+        String trimmed = feedTypeName.trim();
+        for (String canonical : FISH_FEED_TYPES) {
+            if (canonical.equalsIgnoreCase(trimmed)) return canonical;
+        }
+        return null;
+    }
+
     private void transferToFishFeed(String feedTypeName, double kg) {
-        if (!FISH_FEED_TYPES.contains(feedTypeName)) {
+        String canonical = canonicalFishType(feedTypeName);
+        if (canonical == null) {
             return;
         }
-        FishFeedStock stock = fishFeedStock(feedTypeName);
+        FishFeedStock stock = fishFeedStock(canonical);
         stock.setAdded(stock.getAdded() + kg);
         fishFeedStockRepository.save(stock);
     }
@@ -377,15 +464,15 @@ public class FeedMillService {
             ingredientRepository.save(ingredient);
         }
 
-        boolean oldFish = FISH_FEED_TYPES.contains(oldType.getName());
-        boolean newFish = FISH_FEED_TYPES.contains(newType.getName());
-        if (oldFish) {
-            FishFeedStock stock = fishFeedStock(oldType.getName());
+        String oldFishType = canonicalFishType(oldType.getName());
+        String newFishType = canonicalFishType(newType.getName());
+        if (oldFishType != null) {
+            FishFeedStock stock = fishFeedStock(oldFishType);
             stock.setAdded(stock.getAdded() - oldQty * 1000);
             fishFeedStockRepository.save(stock);
         }
-        if (newFish) {
-            FishFeedStock stock = fishFeedStock(newType.getName());
+        if (newFishType != null) {
+            FishFeedStock stock = fishFeedStock(newFishType);
             stock.setAdded(stock.getAdded() + newQty * 1000);
             fishFeedStockRepository.save(stock);
         }
@@ -400,9 +487,46 @@ public class FeedMillService {
         return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
     }
 
+    // Maps to the DTO here, inside the transaction, rather than handing the
+    // raw entity Page back to the controller to map — feedType is a LAZY
+    // @ManyToOne (see FeedProductionLogEntry), and open-in-view is off
+    // (application.yaml), so touching it after this method returns (i.e.
+    // once the session that could load it is already closed) throws
+    // LazyInitializationException. That surfaced as every Production
+    // History request coming back "Something went wrong" — a real 500,
+    // not a data problem; the summary tab worked because it never returns
+    // entities past its own transaction boundary in the first place.
     @Transactional(readOnly = true)
-    public Page<FeedProductionLogEntry> productionHistory(Pageable pageable) {
-        return productionRepository.findAllByOrderByOccurredAtDesc(pageable);
+    public Page<ProductionLogResponse> productionHistory(Pageable pageable) {
+        return productionRepository.findAllByOrderByOccurredAtDesc(pageable)
+                .map(e -> ProductionLogResponse.from(e, isEditable(e.getOccurredAt())));
+    }
+
+    /**
+     * Fish Feed Production History, filtered server-side — same
+     * lazy-association mapping-inside-the-transaction reasoning as
+     * {@link #productionHistory}. {@code typeFilter} narrows to one
+     * specific fish type (matched via {@link #canonicalFishType}); null/
+     * blank means all 3. An unrecognised typeFilter is a 400, not a
+     * silently-empty page — the frontend only ever sends one of the 3
+     * canonical names or omits it, so this should never trigger in
+     * practice.
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductionLogResponse> fishFeedProductionHistory(String typeFilter, Pageable pageable) {
+        Collection<String> names;
+        if (typeFilter == null || typeFilter.isBlank()) {
+            names = FISH_FEED_TYPES;
+        } else {
+            String canonical = canonicalFishType(typeFilter);
+            if (canonical == null) {
+                throw new BadRequestException("\"" + typeFilter + "\" is not a fish feed type.");
+            }
+            names = List.of(canonical);
+        }
+        List<String> lowerNames = names.stream().map(String::toLowerCase).toList();
+        return productionRepository.findAllByFeedTypeNameLowerIn(lowerNames, pageable)
+                .map(e -> ProductionLogResponse.from(e, isEditable(e.getOccurredAt())));
     }
 
     @Transactional(readOnly = true)
@@ -422,9 +546,54 @@ public class FeedMillService {
                 .orElseGet(() -> fishFeedStockRepository.save(FishFeedStock.builder().type(type).build()));
     }
 
+    /**
+     * Read-only twin of {@link #fishFeedStock} — same reason as
+     * MortalityService's peekCategoryValue: {@code @Transactional} on a
+     * self-invoked method (called here via {@code this::}) never runs
+     * through Spring's proxy, so it executes inside the caller's
+     * {@code @Transactional(readOnly = true)} instead, and the
+     * "insert a default row" write throws "Connection is read-only" the
+     * first time a fresh database is queried. Returns an unsaved,
+     * default-valued instance instead of ever writing from a read path.
+     */
+    private FishFeedStock peekFishFeedStock(String type) {
+        return fishFeedStockRepository.findByType(type)
+                .orElseGet(() -> FishFeedStock.builder().type(type).build());
+    }
+
     @Transactional(readOnly = true)
     public List<FishFeedStock> listFishFeedStock() {
-        return FISH_FEED_TYPES.stream().map(this::fishFeedStock).toList();
+        return FISH_FEED_TYPES.stream().map(this::peekFishFeedStock).toList();
+    }
+
+    /**
+     * One-time (and safe to re-run) repair for the case-sensitivity bug
+     * fixed in {@link #canonicalFishType}: before that fix, any fish feed
+     * type whose FeedType name wasn't typed with the exact canonical
+     * capitalization (e.g. a FeedType literally named "Fish starter")
+     * silently never had its produced kg added to the matching
+     * FishFeedStock row — ingredients were deducted, but "added" stayed
+     * wrong. This recomputes each of the 3 fish types' "added" field from
+     * scratch as the sum of every FeedProductionLogEntry that matches it
+     * case-insensitively, replacing whatever drifted value is currently
+     * stored. Collected/opening are untouched — only "added" is resynced.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Added Stock", type = LogType.AUDIT, detail = "'Resynced Added from full production history'")
+    @Transactional
+    public void recalculateFishFeedAdded() {
+        Map<String, Double> totalsKg = new LinkedHashMap<>();
+        for (String type : FISH_FEED_TYPES) totalsKg.put(type, 0.0);
+        for (FeedProductionLogEntry entry : productionRepository.findAll()) {
+            String canonical = canonicalFishType(entry.getFeedType().getName());
+            if (canonical != null) {
+                totalsKg.merge(canonical, entry.getQtyTons() * 1000, Double::sum);
+            }
+        }
+        for (Map.Entry<String, Double> e : totalsKg.entrySet()) {
+            FishFeedStock stock = fishFeedStock(e.getKey());
+            stock.setAdded(e.getValue());
+            fishFeedStockRepository.save(stock);
+        }
     }
 
     @Audited(module = Mod.FEED_MILL, action = "Update Opening Stock", detail = "'Fish Feed ' + #type + ' -> ' + #request.value()")

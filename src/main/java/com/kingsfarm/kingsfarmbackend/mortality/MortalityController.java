@@ -51,9 +51,7 @@ public class MortalityController {
 
     @GetMapping("/pens/today")
     public List<MortPenEntryResponse> getTodayPenEntries() {
-        return service.getTodayPenEntries().stream()
-                .map(e -> MortPenEntryResponse.from(e, service.isEditable(e.getEntryDate())))
-                .toList();
+        return service.getTodayPenEntries();
     }
 
     @PatchMapping("/pens/{penId}")
@@ -61,8 +59,7 @@ public class MortalityController {
     public MortPenEntryResponse updatePenEntry(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                 @PathVariable Long penId,
                                                 @Valid @RequestBody UpdateMortPenEntryRequest request) {
-        MortPenEntry entry = service.updatePenEntry(penId, request, principal.username());
-        return MortPenEntryResponse.from(entry, service.isEditable(entry.getEntryDate()));
+        return service.updatePenEntry(penId, request, principal.username());
     }
 
     // ── Sales ─────────────────────────────────────────────────────────────
