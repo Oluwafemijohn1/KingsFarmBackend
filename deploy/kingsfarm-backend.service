@@ -1,0 +1,17 @@
+# Install on the VPS at /etc/systemd/system/kingsfarm-backend.service
+[Unit]
+Description=KingsFarm Spring Boot backend
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+User=deploy
+WorkingDirectory=/opt/kingsfarm/backend
+EnvironmentFile=/opt/kingsfarm/backend.env
+ExecStart=/usr/bin/java -Xms256m -Xmx1g -jar /opt/kingsfarm/backend/app.jar
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

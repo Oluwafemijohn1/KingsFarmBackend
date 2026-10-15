@@ -1,0 +1,93 @@
+name: Deploy backend
+
+# Push to main -> build the JAR -> copy it to the VPS -> restart the service.
+# All secrets/vars live in the GitHub Environment named "production"
+# (Repo -> Settings -> Environments -> production).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      # Tests are skipped on purpose: the only test is a Spring context load,
+      # which needs a live MySQL. Add a MySQL service container here later if
+      # you want real tests in CI.
+      - name: Build JAR
+        run: ./mvnw -B -DskipTests package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: target/KingsFarmBackend-0.0.1-SNAPSHOT.jar
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+
+      - name: Set up SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      # Runtime config for the app. systemd reads this file (EnvironmentFile),
+      # so values must be plain: no quotes, spaces or '#'. Generate secrets
+      # with `openssl rand -hex 32`.
+      - name: Build env file from GitHub secrets
+        run: |
+          {
+            echo "DB_USERNAME=${{ secrets.DB_USERNAME }}"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}"
+            echo "API_SHARED_KEY=${{ secrets.API_SHARED_KEY }}"
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
+            echo "APP_CORS_ALLOWED_ORIGINS=${{ vars.APP_CORS_ALLOWED_ORIGINS }}"
+            echo "AUTH_COOKIE_SECURE=true"
+            echo "BOOTSTRAP_ADMIN_USERNAME=${{ vars.BOOTSTRAP_ADMIN_USERNAME }}"
+            echo "BOOTSTRAP_ADMIN_NAME=${{ vars.BOOTSTRAP_ADMIN_NAME }}"
+            echo "SERVER_ADDRESS=127.0.0.1"
+            echo "SPRING_JPA_SHOW_SQL=false"
+          } > backend.env
+
+      - name: Upload JAR + env file
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy"
+          TARGET="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          scp -i ~/.ssh/id_deploy KingsFarmBackend-0.0.1-SNAPSHOT.jar "$TARGET:/opt/kingsfarm/backend/app.jar.new"
+          scp -i ~/.ssh/id_deploy backend.env "$TARGET:/opt/kingsfarm/backend.env.new"
+          $SSH "$TARGET" 'chmod 600 /opt/kingsfarm/backend.env.new && mv /opt/kingsfarm/backend.env.new /opt/kingsfarm/backend.env && mv /opt/kingsfarm/backend/app.jar.new /opt/kingsfarm/backend/app.jar'
+
+      - name: Restart service and wait for health
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -s' <<'EOF'
+          set -e
+          sudo systemctl restart kingsfarm-backend
+          set -a; . /opt/kingsfarm/backend.env; set +a
+          for i in $(seq 1 30); do
+            if curl -fsS -H "X-API-Key: $API_SHARED_KEY" http://127.0.0.1:8080/actuator/health >/dev/null; then
+              echo "Backend is healthy"; exit 0
+            fi
+            sleep 3
+          done
+          echo "Backend did not become healthy in time"
+          sudo journalctl -u kingsfarm-backend -n 60 --no-pager
+          exit 1
+          EOF
