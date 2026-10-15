@@ -21,6 +21,23 @@ spring:
     password: ${DB_PASSWORD:changeme}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+  # Outgoing email (account verification / password setup). Leave MAIL_HOST
+  # empty to run without SMTP: the setup link is then written to the server
+  # log instead of being emailed. Namecheap Private Email: host
+  # mail.privateemail.com, port 587 (STARTTLS), username = the full mailbox
+  # address, e.g. noreply@kingfarmsltd.com.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+
   jpa:
     hibernate:
       # "update" auto-creates/updates tables from your @Entity classes on
@@ -95,5 +112,11 @@ app:
   # exists — every account after this one is created by that Administrator
   # from inside the app, never by signing up.
   bootstrap:
-    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:admin@example.com}
     admin-full-name: ${BOOTSTRAP_ADMIN_NAME:System Administrator}
+  mail:
+    from: ${MAIL_FROM:noreply@kingfarmsltd.com}
+    # Where the frontend lives; the emailed setup link points here.
+    frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+    # Hours a verification / password-setup link stays valid.
+    token-hours: ${MAIL_TOKEN_HOURS:48}

@@ -3,9 +3,9 @@ package com.kingsfarm.kingsfarmbackend.user.dto;
 import com.kingsfarm.kingsfarmbackend.user.Role;
 
 /**
- * The one and only time the plain-text generated password is ever returned.
- * The admin relays {@code generatedPassword} to the new user out of band;
- * neither this value nor anything derivable from it is retrievable again.
+ * No password is ever returned: the new user receives a verification email
+ * and sets their own password from the link. {@code emailSent} is false when
+ * SMTP is not configured or delivery failed (the link is then in the server log).
  */
 public record CreateUserResponse(
         Long id,
@@ -13,6 +13,6 @@ public record CreateUserResponse(
         String fullName,
         Role role,
         String roleLabel,
-        String generatedPassword
+        boolean emailSent
 ) {
 }

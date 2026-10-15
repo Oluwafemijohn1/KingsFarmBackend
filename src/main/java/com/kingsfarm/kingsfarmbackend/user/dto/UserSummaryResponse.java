@@ -14,6 +14,7 @@ public record UserSummaryResponse(
         String roleLabel,
         boolean active,
         boolean mustChangePassword,
+        boolean emailVerified,
         Instant createdAt,
         String createdBy,
         Instant lastLoginAt
@@ -22,7 +23,7 @@ public record UserSummaryResponse(
         return new UserSummaryResponse(
                 user.getId(), user.getUsername(), user.getFullName(),
                 user.getRole(), user.getRole().label(),
-                user.isActive(), user.isMustChangePassword(),
+                user.isActive(), user.isMustChangePassword(), user.isEmailVerified(),
                 user.getCreatedAt(), user.getCreatedBy(), user.getLastLoginAt()
         );
     }
