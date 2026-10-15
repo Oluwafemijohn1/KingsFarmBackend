@@ -80,7 +80,9 @@ jobs:
           ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -s' <<'EOF'
           set -e
           sudo systemctl restart kingsfarm-backend
-          set -a; . /opt/kingsfarm/backend.env; set +a
+          # Read just the one value (not `source` the whole file: other values,
+          # like a full name with a space, aren't valid shell syntax).
+          API_SHARED_KEY=$(grep '^API_SHARED_KEY=' /opt/kingsfarm/backend.env | cut -d= -f2-)
           for i in $(seq 1 30); do
             if curl -fsS -H "X-API-Key: $API_SHARED_KEY" http://127.0.0.1:8080/actuator/health >/dev/null; then
               echo "Backend is healthy"; exit 0
