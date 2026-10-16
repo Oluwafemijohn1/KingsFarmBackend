@@ -51,10 +51,10 @@ public class EmailService {
 
     /** @return true if the email was handed to the SMTP server. */
     public boolean sendAccountSetup(User user, String rawToken, boolean passwordReset, int validHours) {
-        String subject = passwordReset ? "Reset your King's Farm password" : "Verify your email for King's Farm";
+        String subject = passwordReset ? "Reset your King Farms password" : "Verify your email for King Farms";
         String lead = passwordReset
-                ? "An administrator reset your King's Farm password. Use the button below to choose a new one."
-                : "An account has been created for you on King's Farm. Use the button below to verify your email address and choose your password.";
+                ? "An administrator reset your King Farms password. Use the button below to choose a new one."
+                : "An account has been created for you on King Farms. Use the button below to verify your email address and choose your password.";
         return send(user.getUsername(), subject,
                 passwordReset ? "Reset your password" : "Verify your email",
                 "Hello " + user.getFullName() + ",",
@@ -81,7 +81,7 @@ public class EmailService {
         try {
             MimeMessage message = mailSender.getObject().createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(from, "King's Farm");
+            helper.setFrom(from, "King Farms");
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(plainText(greeting, paragraphs, buttonLabel, link, footnote),
