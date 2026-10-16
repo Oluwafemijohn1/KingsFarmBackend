@@ -11,11 +11,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class SecuritySettingsService {
 
     private final SecuritySettingsRepository repository;
+    private final com.kingsfarm.kingsfarmbackend.common.CacheEviction cacheEviction;
 
-    public SecuritySettingsService(SecuritySettingsRepository repository) {
+    public SecuritySettingsService(SecuritySettingsRepository repository, com.kingsfarm.kingsfarmbackend.common.CacheEviction cacheEviction) {
         this.repository = repository;
+        this.cacheEviction = cacheEviction;
     }
 
+    @org.springframework.cache.annotation.Cacheable("securitySettings")
     @Transactional
     public SecuritySettings get() {
         return repository.findById(SecuritySettings.SINGLETON_ID)
@@ -28,6 +31,8 @@ public class SecuritySettingsService {
         settings.setSessionTimeoutMinutes(sessionTimeoutMinutes);
         settings.setLockoutAttempts(lockoutAttempts);
         settings.setPasswordMinLength(passwordMinLength);
-        return repository.save(settings);
+        SecuritySettings saved = repository.save(settings);
+        cacheEviction.clearAfterCommit("securitySettings");
+        return saved;
     }
 }

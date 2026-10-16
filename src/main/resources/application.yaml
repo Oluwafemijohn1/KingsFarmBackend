@@ -38,6 +38,17 @@ spring:
       mail.smtp.timeout: 10000
       mail.smtp.writetimeout: 10000
 
+  # In-memory caches (single server instance): security settings and the
+  # Units catalog are read on nearly every request but change rarely, and are
+  # evicted the moment an Administrator edits them.
+  # Entries also expire on their own after 5 minutes as a safety net, so even
+  # a missed eviction can never leave stale data for long.
+  cache:
+    type: caffeine
+    cache-names: securitySettings,units
+    caffeine:
+      spec: maximumSize=100,expireAfterWrite=5m
+
   jpa:
     hibernate:
       # "update" auto-creates/updates tables from your @Entity classes on
@@ -50,6 +61,13 @@ spring:
       hibernate:
         format_sql: true
     open-in-view: false
+
+# gzip JSON responses over ~1KB (Nginx also compresses; this covers direct hits).
+server:
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 1024
 
 # Only expose a bare-minimum health check on the actuator — everything else
 # (env, beans, mappings, etc.) stays off, and even /health still sits behind
