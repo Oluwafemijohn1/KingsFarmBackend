@@ -28,10 +28,14 @@ import java.util.List;
 @Service
 public class ReliefAccessService {
 
+    private final com.kingsfarm.kingsfarmbackend.user.NotificationService notifications;
+
     private final ReliefGrantRepository grantRepository;
     private final UserRepository userRepository;
 
-    public ReliefAccessService(ReliefGrantRepository grantRepository, UserRepository userRepository) {
+    public ReliefAccessService(ReliefGrantRepository grantRepository, UserRepository userRepository,
+                               com.kingsfarm.kingsfarmbackend.user.NotificationService notifications) {
+        this.notifications = notifications;
         this.grantRepository = grantRepository;
         this.userRepository = userRepository;
     }
@@ -94,7 +98,9 @@ public class ReliefAccessService {
                 .reason(request.reason() == null ? "" : request.reason().trim())
                 .grantedBy(adminUsername)
                 .build();
-        return ReliefGrantResponse.from(grantRepository.save(grantEntity));
+        ReliefGrant saved = grantRepository.save(grantEntity);
+        notifications.leaveGranted(onLeave.getUsername(), onLeave.getFullName(), grantee.getUsername(), grantee.getFullName(), saved.getReason());
+        return ReliefGrantResponse.from(saved);
     }
 
     /** See activeGrants()'s javadoc — onLeaveUser is still a LAZY proxy here (never touched above), so it's resolved into the response inside the transaction too. */
@@ -107,6 +113,8 @@ public class ReliefAccessService {
             grant.setRevokedAt(Instant.now());
             grant.setRevokedBy(adminUsername);
             grantRepository.save(grant);
+            notifications.leaveEnded(grant.getOnLeaveUser().getUsername(), grant.getOnLeaveUser().getFullName(),
+                    grant.getGranteeUser().getUsername(), grant.getGranteeUser().getFullName());
         }
         return ReliefGrantResponse.from(grant);
     }

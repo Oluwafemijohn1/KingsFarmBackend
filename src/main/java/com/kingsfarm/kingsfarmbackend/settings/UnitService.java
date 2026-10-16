@@ -21,11 +21,14 @@ import java.util.List;
 public class UnitService {
 
     private final UnitRepository repository;
+    private final com.kingsfarm.kingsfarmbackend.common.CacheEviction cacheEviction;
 
-    public UnitService(UnitRepository repository) {
+    public UnitService(UnitRepository repository, com.kingsfarm.kingsfarmbackend.common.CacheEviction cacheEviction) {
         this.repository = repository;
+        this.cacheEviction = cacheEviction;
     }
 
+    @org.springframework.cache.annotation.Cacheable("units")
     @Transactional(readOnly = true)
     public List<Unit> list() {
         return repository.findAllByOrderByIdAsc();
@@ -41,7 +44,9 @@ public class UnitService {
         if (repository.existsByNameIgnoreCase(name)) {
             throw new ConflictException("This unit already exists.");
         }
-        return repository.save(Unit.builder().name(name).build());
+        Unit saved = repository.save(Unit.builder().name(name).build());
+        cacheEviction.clearAfterCommit("units");
+        return saved;
     }
 
     @Audited(module = Mod.ADMIN, action = "Remove Unit of Measurement", detail = "'Unit #' + #id")
@@ -51,5 +56,6 @@ public class UnitService {
             throw new NotFoundException("Unit not found.");
         }
         repository.deleteById(id);
+        cacheEviction.clearAfterCommit("units");
     }
 }

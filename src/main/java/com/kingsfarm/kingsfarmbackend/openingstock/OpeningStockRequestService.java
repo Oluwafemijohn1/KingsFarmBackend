@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 @Service
 public class OpeningStockRequestService {
@@ -21,10 +22,13 @@ public class OpeningStockRequestService {
     private final OpeningStockRequestRepository requestRepository;
     private final UserRepository userRepository;
     private final OpeningStockLockService lockService;
+    private final com.kingsfarm.kingsfarmbackend.user.NotificationService notifications;
 
     public OpeningStockRequestService(OpeningStockRequestRepository requestRepository,
                                        UserRepository userRepository,
-                                       OpeningStockLockService lockService) {
+                                       OpeningStockLockService lockService,
+                                       com.kingsfarm.kingsfarmbackend.user.NotificationService notifications) {
+        this.notifications = notifications;
         this.requestRepository = requestRepository;
         this.userRepository = userRepository;
         this.lockService = lockService;
@@ -44,7 +48,11 @@ public class OpeningStockRequestService {
                 .reason(request.reason())
                 .status(RequestStatus.PENDING)
                 .build();
-        return OpeningStockRequestResponse.from(requestRepository.save(entity));
+        OpeningStockRequest saved = requestRepository.save(entity);
+        List<String> adminEmails = userRepository.findAllByRoleAndActiveTrue(com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR)
+                .stream().map(User::getUsername).toList();
+        notifications.openingStockRequested(adminEmails, requestedBy.getFullName(), saved.getModule().wire(), saved.getScopeLabel(), saved.getReason());
+        return OpeningStockRequestResponse.from(saved);
     }
 
     /**
@@ -91,6 +99,9 @@ public class OpeningStockRequestService {
         if (decision == RequestStatus.APPROVED) {
             lockService.unlock(request.getModule(), request.getScope());
         }
+        User requester = request.getRequestedBy();
+        notifications.openingStockResolved(requester.getUsername(), requester.getFullName(), request.getModule().wire(),
+                request.getScopeLabel(), decision == RequestStatus.APPROVED, resolvedBy.getFullName(), "/" + request.getModule().wire());
         // requestedBy is still a LAZY proxy at this point (never touched
         // above) — resolve it into the response here, inside the
         // transaction, same reasoning as list() above.
