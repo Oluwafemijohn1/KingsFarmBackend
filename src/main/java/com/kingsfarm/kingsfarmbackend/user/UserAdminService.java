@@ -2,6 +2,7 @@ package com.kingsfarm.kingsfarmbackend.user;
 
 import com.kingsfarm.kingsfarmbackend.audit.Audited;
 import com.kingsfarm.kingsfarmbackend.common.Mod;
+import com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException;
 import com.kingsfarm.kingsfarmbackend.common.exception.ConflictException;
 import com.kingsfarm.kingsfarmbackend.common.exception.NotFoundException;
 import com.kingsfarm.kingsfarmbackend.relief.ReliefAccessService;
@@ -67,6 +68,9 @@ public class UserAdminService {
     @Transactional
     public UserSummaryResponse updateUser(Long id, UpdateUserRequest request) {
         User user = findOrThrow(id);
+        if (user.getRole() == Role.ADMINISTRATOR && request.role() != Role.ADMINISTRATOR) {
+            throw new BadRequestException("An Administrator account's role cannot be changed.");
+        }
         user.setFullName(request.fullName());
         user.setRole(request.role());
         return UserSummaryResponse.from(userRepository.save(user));
@@ -84,6 +88,9 @@ public class UserAdminService {
     @Transactional
     public UserSummaryResponse setActive(Long id, boolean active, String actingUsername) {
         User user = findOrThrow(id);
+        if (!active && user.getRole() == Role.ADMINISTRATOR) {
+            throw new BadRequestException("Administrator accounts cannot be deactivated.");
+        }
         user.setActive(active);
         User saved = userRepository.save(user);
         if (!active) {
