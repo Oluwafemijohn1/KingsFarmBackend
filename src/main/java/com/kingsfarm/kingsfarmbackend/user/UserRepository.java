@@ -12,6 +12,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     Page<User> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
+    List<User> findAllByRoleAndActiveTrue(Role role);
+
     /** Eligible pool for Relief Access — matches the frontend's eligibleUsers filter (non-Administrator, active accounts only). */
     List<User> findAllByRoleNotAndActiveTrueOrderByFullNameAsc(Role role);
 }
