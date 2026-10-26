@@ -304,7 +304,7 @@ public class WholeEggService {
         if (totalQty <= 0) {
             throw new BadRequestException("Enter at least one category quantity.");
         }
-        validatePaymentMethods(request.paymentMethods(), request.bank());
+        Payment pay = resolvePayment(request.paymentMethods(), request.bank(), request.transfers(), request.cashAmount(), request.transferAmount());
 
         for (SaleLineItemRequest item : request.items()) {
             if (item.qty() <= 0) continue;
@@ -317,16 +317,15 @@ public class WholeEggService {
         // Sales Amount = Quantity Sold × Price per Crate — must stay fractional (e.g. 0.5 crate × ₦4,000 = ₦2,000), never truncated to a long.
         double totalDue = request.items().stream().mapToDouble(i -> i.qty() * i.price()).sum();
         double priorBalance = customerBalance(customer);
-        long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
-        long amountPaid = amounts[0] + amounts[1];
+        long amountPaid = pay.cash() + pay.transferTotal();
         double remaining = totalDue + priorBalance - amountPaid;
 
         WeSaleTransaction txn = WeSaleTransaction.builder()
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
                 .type(WeSaleTxnType.SALE)
                 .paymentMethods(new HashSet<>(request.paymentMethods()))
-                .bank(request.paymentMethods().contains(PaymentMethod.TRANSFER) ? request.bank() : null)
-                .cashAmount(amounts[0]).transferAmount(amounts[1]).amountPaid(amountPaid)
+                .bank(pay.bankLabel()).transfers(new ArrayList<>(pay.transfers()))
+                .cashAmount(pay.cash()).transferAmount(pay.transferTotal()).amountPaid(amountPaid)
                 .credit(Math.max(remaining, 0)).advance(Math.max(-remaining, 0))
                 .enteredBy(username)
                 .build();
@@ -345,10 +344,9 @@ public class WholeEggService {
         Customer customer = customerRepository.findById(request.customerId())
                 .orElseThrow(() -> new NotFoundException("Customer not found."));
 
-        validatePaymentMethods(request.paymentMethods(), request.bank());
+        Payment pay = resolvePayment(request.paymentMethods(), request.bank(), request.transfers(), request.cashAmount(), request.transferAmount());
         double balanceOwed = customerBalance(customer);
-        long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
-        long amountPaid = amounts[0] + amounts[1];
+        long amountPaid = pay.cash() + pay.transferTotal();
         if (amountPaid <= 0) {
             throw new BadRequestException("Enter the amount being paid.");
         }
@@ -358,8 +356,8 @@ public class WholeEggService {
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
                 .type(WeSaleTxnType.PAYMENT)
                 .paymentMethods(new HashSet<>(request.paymentMethods()))
-                .bank(request.paymentMethods().contains(PaymentMethod.TRANSFER) ? request.bank() : null)
-                .cashAmount(amounts[0]).transferAmount(amounts[1]).amountPaid(amountPaid)
+                .bank(pay.bankLabel()).transfers(new ArrayList<>(pay.transfers()))
+                .cashAmount(pay.cash()).transferAmount(pay.transferTotal()).amountPaid(amountPaid)
                 .credit(Math.max(remaining, 0)).advance(Math.max(-remaining, 0))
                 .enteredBy(username)
                 .build();
@@ -373,7 +371,7 @@ public class WholeEggService {
         if (!isEditable(txn)) {
             throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
         }
-        validatePaymentMethods(request.paymentMethods(), request.bank());
+        Payment pay = resolvePayment(request.paymentMethods(), request.bank(), request.transfers(), request.cashAmount(), request.transferAmount());
 
         List<SaleLineItemRequest> items = request.items() != null ? request.items() : List.of();
         double totalQty = items.stream().mapToDouble(SaleLineItemRequest::qty).sum();
@@ -382,8 +380,7 @@ public class WholeEggService {
         }
         double totalDue = items.stream().mapToDouble(i -> i.qty() * i.price()).sum();
         double priorBalance = priorBalanceFor(txn);
-        long[] amounts = effectiveAmounts(request.paymentMethods(), request.cashAmount(), request.transferAmount());
-        long amountPaid = amounts[0] + amounts[1];
+        long amountPaid = pay.cash() + pay.transferTotal();
         double remaining = totalDue + priorBalance - amountPaid;
 
         lineItemRepository.deleteAllByTransaction(txn);
@@ -393,9 +390,11 @@ public class WholeEggService {
         }
 
         txn.setPaymentMethods(new HashSet<>(request.paymentMethods()));
-        txn.setBank(request.paymentMethods().contains(PaymentMethod.TRANSFER) ? request.bank() : null);
-        txn.setCashAmount(amounts[0]);
-        txn.setTransferAmount(amounts[1]);
+        txn.setBank(pay.bankLabel());
+        txn.getTransfers().clear();
+        txn.getTransfers().addAll(pay.transfers());
+        txn.setCashAmount(pay.cash());
+        txn.setTransferAmount(pay.transferTotal());
         txn.setAmountPaid(amountPaid);
         txn.setCredit(Math.max(remaining, 0));
         txn.setAdvance(Math.max(-remaining, 0));
@@ -403,20 +402,51 @@ public class WholeEggService {
         return transactionRepository.save(txn);
     }
 
-    private void validatePaymentMethods(List<PaymentMethod> methods, String bank) {
+    /** Everything derived from the payment part of a request, already validated. */
+    private record Payment(long cash, long transferTotal, List<BankTransfer> transfers, String bankLabel) {
+    }
+
+    /**
+     * Validates the payment methods and works out what was actually paid.
+     * Cash counts only if Cash is selected; transfers count only if Transfer
+     * is selected. Multi-bank: when {@code transfers} is given, each row needs
+     * a bank and an amount above zero, repeated banks are merged, and the
+     * transfer total is the sum of the rows. If it's absent (older clients), the
+     * single {@code bank} + {@code transferAmount} are treated as one row.
+     */
+    private Payment resolvePayment(List<PaymentMethod> methods, String bank, List<BankTransferRequest> transfers, long cashAmount, long transferAmount) {
         if (methods == null || methods.isEmpty()) {
             throw new BadRequestException("Select at least one payment method.");
         }
-        if (methods.contains(PaymentMethod.TRANSFER) && (bank == null || bank.isBlank())) {
-            throw new BadRequestException("Please select the bank the customer transferred to.");
-        }
-    }
-
-    /** [cashAmount, transferAmount] — zeroed out for any method not actually selected, same as the frontend's "effective" amounts. */
-    private long[] effectiveAmounts(List<PaymentMethod> methods, long cashAmount, long transferAmount) {
         long cash = methods.contains(PaymentMethod.CASH) ? cashAmount : 0;
-        long transfer = methods.contains(PaymentMethod.TRANSFER) ? transferAmount : 0;
-        return new long[]{cash, transfer};
+        if (!methods.contains(PaymentMethod.TRANSFER)) {
+            return new Payment(cash, 0, List.of(), null);
+        }
+
+        java.util.LinkedHashMap<String, Long> byBank = new java.util.LinkedHashMap<>();
+        if (transfers != null && !transfers.isEmpty()) {
+            for (BankTransferRequest t : transfers) {
+                if (t.bank() == null || t.bank().isBlank()) {
+                    throw new BadRequestException("Please select a bank for every transfer.");
+                }
+                if (t.amount() <= 0) {
+                    throw new BadRequestException("Enter the amount transferred to " + t.bank().trim() + ".");
+                }
+                byBank.merge(t.bank().trim(), t.amount(), Long::sum);
+            }
+        } else {
+            if (bank == null || bank.isBlank()) {
+                throw new BadRequestException("Please select the bank the customer transferred to.");
+            }
+            byBank.put(bank.trim(), transferAmount);
+        }
+        List<BankTransfer> rows = byBank.entrySet().stream().map(e -> new BankTransfer(e.getKey(), e.getValue())).toList();
+        long total = rows.stream().mapToLong(BankTransfer::getAmount).sum();
+        String label = String.join(", ", byBank.keySet());
+        if (label.length() > 64) {
+            label = label.substring(0, 61) + "...";
+        }
+        return new Payment(cash, total, rows, label);
     }
 
     public boolean isEditable(WeSaleTransaction txn) {
@@ -436,8 +466,20 @@ public class WholeEggService {
                 txn.getType(), txn.getOccurredAt(), txn.getTxnYear(), items, revenue,
                 txn.getPaymentMethods(), txn.getBank(), txn.getCashAmount(), txn.getTransferAmount(), txn.getAmountPaid(),
                 txn.getCredit(), txn.getAdvance(), txn.getEnteredBy(), txn.getUpdatedBy(), isEditable(txn), priorBalanceFor(txn),
-                txn.getVerificationStatus(), txn.getVerificationRemark(), txn.getVerifiedBy(), txn.getVerifiedAt()
+                txn.getVerificationStatus(), txn.getVerificationRemark(), txn.getVerifiedBy(), txn.getVerifiedAt(),
+                transferRows(txn)
         );
+    }
+
+    /** Per-bank rows for the response; rows saved before multi-bank support fall back to their single bank + transfer amount. */
+    private List<BankTransferResponse> transferRows(WeSaleTransaction txn) {
+        if (!txn.getTransfers().isEmpty()) {
+            return txn.getTransfers().stream().map(t -> new BankTransferResponse(t.getBank(), t.getAmount())).toList();
+        }
+        if (txn.getBank() != null && !txn.getBank().isBlank() && txn.getTransferAmount() > 0) {
+            return List.of(new BankTransferResponse(txn.getBank(), txn.getTransferAmount()));
+        }
+        return List.of();
     }
 
     /** isAdmin sees every year; a manager is restricted to the current year — matches WholeEggView's customerVisibleTxns. */

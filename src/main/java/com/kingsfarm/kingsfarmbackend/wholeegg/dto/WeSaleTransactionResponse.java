@@ -34,6 +34,8 @@ public record WeSaleTransactionResponse(
         VerificationStatus verificationStatus,
         String verificationRemark,
         String verifiedBy,
-        Instant verifiedAt
+        Instant verifiedAt,
+        /** Each bank the customer transferred to, with its amount (empty for cash-only). */
+        List<BankTransferResponse> transfers
 ) {
 }
