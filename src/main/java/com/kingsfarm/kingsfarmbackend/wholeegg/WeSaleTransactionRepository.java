@@ -13,6 +13,11 @@ import java.util.Optional;
 
 public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransaction, Long> {
 
+    /** True if the customer already has any of the given transaction types (e.g. a real sale or payment). */
+    boolean existsByCustomerAndTypeIn(Customer customer, java.util.Collection<WeSaleTxnType> types);
+
+    Optional<WeSaleTransaction> findFirstByCustomerAndType(Customer customer, WeSaleTxnType type);
+
     /** Full history, oldest first — how the running credit/advance balance is walked (see WholeEggService.customerBalance). */
     List<WeSaleTransaction> findAllByCustomerOrderByOccurredAtAsc(Customer customer);
 

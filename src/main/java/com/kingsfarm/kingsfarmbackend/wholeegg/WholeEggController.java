@@ -80,6 +80,15 @@ public class WholeEggController {
         return service.toCustomerResponse(customer, false);
     }
 
+    @PutMapping("/customers/{id}/opening-balance")
+    @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
+    public CustomerResponse setOpeningBalance(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                               @PathVariable Long id,
+                                               @Valid @RequestBody SetOpeningBalanceRequest request) {
+        Customer customer = service.setOpeningBalance(id, request, principal.username());
+        return service.toCustomerResponse(customer, false);
+    }
+
     @GetMapping("/customers")
     public PageResponse<CustomerResponse> listCustomers(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                           @PageableDefault(size = 20) Pageable pageable) {
