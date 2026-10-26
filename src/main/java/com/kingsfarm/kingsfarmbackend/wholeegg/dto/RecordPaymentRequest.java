@@ -12,6 +12,8 @@ public record RecordPaymentRequest(
         @NotEmpty List<PaymentMethod> paymentMethods,
         String bank,
         @Min(0) long cashAmount,
-        @Min(0) long transferAmount
+        @Min(0) long transferAmount,
+        /** Multi-bank transfers. When present (and Transfer is selected) this wins over {@code bank}/{@code transferAmount}: transferAmount is the sum of these. */
+        @jakarta.validation.Valid List<BankTransferRequest> transfers
 ) {
 }

@@ -10,7 +10,9 @@ import lombok.Setter;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -66,8 +68,16 @@ public class WeSaleTransaction {
     @Builder.Default
     private Set<PaymentMethod> paymentMethods = new HashSet<>();
 
+    /** Summary label of the bank(s) used, e.g. "GTBank" or "GTBank, FCMB" — kept for quick display/search; the real per-bank amounts are in {@link #transfers}. */
     @Column(length = 64)
     private String bank;
+
+    /** Every bank the customer transferred to for this transaction, with the amount sent to each (sums to {@link #transferAmount}). Empty for cash-only rows and for rows recorded before multi-bank support (they just have {@link #bank}). */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "we_sale_transaction_transfers", joinColumns = @JoinColumn(name = "transaction_id"))
+    @OrderColumn(name = "position")
+    @Builder.Default
+    private List<BankTransfer> transfers = new ArrayList<>();
 
     @Column(name = "cash_amount", nullable = false)
     @Builder.Default
