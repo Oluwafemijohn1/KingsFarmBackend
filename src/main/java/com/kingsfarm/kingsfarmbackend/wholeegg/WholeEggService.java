@@ -219,6 +219,59 @@ public class WholeEggService {
         return customer;
     }
 
+    /**
+     * Lets staff go back to an existing customer profile and record (or fix, or
+     * clear) what the customer already owed / had in advance before using the
+     * system. Only allowed while the customer has no real sale or payment yet:
+     * once they have, every later transaction's running balance was built on
+     * top of the old opening figure, so changing it would silently shift all
+     * of them.
+     */
+    @Audited(module = Mod.WHOLE_EGG, action = "Set Opening Balance", type = LogType.AUDIT,
+            detail = "'Customer #' + #customerId + ' -> owes ' + #request.openingCredit() + ' / advance ' + #request.openingAdvance()")
+    @Transactional
+    public Customer setOpeningBalance(Long customerId, SetOpeningBalanceRequest request, String username) {
+        if (request.openingCredit() > 0 && request.openingAdvance() > 0) {
+            throw new BadRequestException("A customer can't both owe money and have an advance at the same time.");
+        }
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new NotFoundException("Customer not found."));
+        if (transactionRepository.existsByCustomerAndTypeIn(customer, List.of(WeSaleTxnType.SALE, WeSaleTxnType.PAYMENT))) {
+            throw new BadRequestException("This customer already has sales or payments, so the opening balance can no longer be changed.");
+        }
+        // One free edit per customer. After it the field is locked; a further edit needs an
+        // Administrator-approved Opening Stock request for this customer's scope.
+        String scope = openingBalanceScope(customerId);
+        if (lockService.isLocked(Mod.WHOLE_EGG, scope)) {
+            throw new ForbiddenException("This customer's opening balance has already been set once. Request the Administrator's approval to edit it again.");
+        }
+        var existing = transactionRepository.findFirstByCustomerAndType(customer, WeSaleTxnType.OPENING);
+        boolean clear = request.openingCredit() == 0 && request.openingAdvance() == 0;
+        if (clear) {
+            existing.ifPresent(transactionRepository::delete);
+        } else if (existing.isPresent()) {
+            WeSaleTransaction opening = existing.get();
+            opening.setCredit(request.openingCredit());
+            opening.setAdvance(request.openingAdvance());
+            opening.setUpdatedBy(username);
+            transactionRepository.save(opening);
+        } else {
+            transactionRepository.save(WeSaleTransaction.builder()
+                    .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
+                    .type(WeSaleTxnType.OPENING)
+                    .credit(request.openingCredit()).advance(request.openingAdvance())
+                    .enteredBy(username)
+                    .build());
+        }
+        lockService.lock(Mod.WHOLE_EGG, scope);
+        return customer;
+    }
+
+    /** Opening Stock lock scope for one customer's opening balance (shared lock/request machinery). */
+    public static String openingBalanceScope(Long customerId) {
+        return "customer-opening-" + customerId;
+    }
+
     @Transactional(readOnly = true)
     public Page<CustomerResponse> listCustomers(Pageable pageable, boolean isAdmin) {
         return customerRepository.findAllByOrderByCreatedAtDesc(pageable)

@@ -101,7 +101,7 @@ public class OpeningStockRequestService {
         }
         User requester = request.getRequestedBy();
         notifications.openingStockResolved(requester.getUsername(), requester.getFullName(), request.getModule().wire(),
-                request.getScopeLabel(), decision == RequestStatus.APPROVED, resolvedBy.getFullName(), "/" + request.getModule().wire());
+                request.getScopeLabel(), decision == RequestStatus.APPROVED, resolvedBy.getFullName(), request.getScope().startsWith("customer-opening-") ? "/whole-egg/customers" : "/" + request.getModule().wire());
         // requestedBy is still a LAZY proxy at this point (never touched
         // above) — resolve it into the response here, inside the
         // transaction, same reasoning as list() above.
