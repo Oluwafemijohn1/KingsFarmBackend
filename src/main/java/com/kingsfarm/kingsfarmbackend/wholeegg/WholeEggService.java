@@ -239,6 +239,12 @@ public class WholeEggService {
         if (transactionRepository.existsByCustomerAndTypeIn(customer, List.of(WeSaleTxnType.SALE, WeSaleTxnType.PAYMENT))) {
             throw new BadRequestException("This customer already has sales or payments, so the opening balance can no longer be changed.");
         }
+        // One free edit per customer. After it the field is locked; a further edit needs an
+        // Administrator-approved Opening Stock request for this customer's scope.
+        String scope = openingBalanceScope(customerId);
+        if (lockService.isLocked(Mod.WHOLE_EGG, scope)) {
+            throw new ForbiddenException("This customer's opening balance has already been set once. Request the Administrator's approval to edit it again.");
+        }
         var existing = transactionRepository.findFirstByCustomerAndType(customer, WeSaleTxnType.OPENING);
         boolean clear = request.openingCredit() == 0 && request.openingAdvance() == 0;
         if (clear) {
@@ -257,7 +263,13 @@ public class WholeEggService {
                     .enteredBy(username)
                     .build());
         }
+        lockService.lock(Mod.WHOLE_EGG, scope);
         return customer;
+    }
+
+    /** Opening Stock lock scope for one customer's opening balance (shared lock/request machinery). */
+    public static String openingBalanceScope(Long customerId) {
+        return "customer-opening-" + customerId;
     }
 
     @Transactional(readOnly = true)
