@@ -463,7 +463,7 @@ public class WholeEggService {
      * Validates the payment methods and works out what was actually paid.
      * Cash counts only if Cash is selected; transfers count only if Transfer
      * is selected. Multi-bank: when {@code transfers} is given, each row needs
-     * a bank and an amount above zero, repeated banks are merged, and the
+     * a bank and an amount above zero, the same bank may repeat (separate transfers), and the
      * transfer total is the sum of the rows. If it's absent (older clients), the
      * single {@code bank} + {@code transferAmount} are treated as one row.
      */
@@ -476,7 +476,7 @@ public class WholeEggService {
             return new Payment(cash, 0, List.of(), null);
         }
 
-        java.util.LinkedHashMap<String, Long> byBank = new java.util.LinkedHashMap<>();
+        List<BankTransfer> rows = new ArrayList<>();
         if (transfers != null && !transfers.isEmpty()) {
             for (BankTransferRequest t : transfers) {
                 if (t.bank() == null || t.bank().isBlank()) {
@@ -485,17 +485,16 @@ public class WholeEggService {
                 if (t.amount() <= 0) {
                     throw new BadRequestException("Enter the amount transferred to " + t.bank().trim() + ".");
                 }
-                byBank.merge(t.bank().trim(), t.amount(), Long::sum);
+                rows.add(new BankTransfer(t.bank().trim(), t.amount()));
             }
         } else {
             if (bank == null || bank.isBlank()) {
                 throw new BadRequestException("Please select the bank the customer transferred to.");
             }
-            byBank.put(bank.trim(), transferAmount);
+            rows.add(new BankTransfer(bank.trim(), transferAmount));
         }
-        List<BankTransfer> rows = byBank.entrySet().stream().map(e -> new BankTransfer(e.getKey(), e.getValue())).toList();
         long total = rows.stream().mapToLong(BankTransfer::getAmount).sum();
-        String label = String.join(", ", byBank.keySet());
+        String label = String.join(", ", rows.stream().map(BankTransfer::getBank).distinct().toList());
         if (label.length() > 64) {
             label = label.substring(0, 61) + "...";
         }
