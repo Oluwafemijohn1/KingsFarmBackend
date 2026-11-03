@@ -105,18 +105,45 @@ public class WholeEggService {
     /** Sum of every SALE-type transaction's qty for a category — Production's auto-received "Total Sales". */
     @Transactional(readOnly = true)
     public double totalSalesFor(CatKey category) {
-        return soldQtyByCategory().getOrDefault(category, 0.0);
+        return soldQtyByCategory(LocalDate.now()).getOrDefault(category, 0.0);
     }
 
-    private Map<CatKey, Double> soldQtyByCategory() {
+    /** Sales for one specific day — Production's daily carry-forward needs the finished day's figure, not today's. */
+    @Transactional(readOnly = true)
+    public double totalSalesFor(CatKey category, LocalDate day) {
+        return soldQtyByCategory(day).getOrDefault(category, 0.0);
+    }
+
+    private Map<CatKey, Double> soldQtyByCategory(LocalDate day) {
         Map<CatKey, Double> map = new EnumMap<>(CatKey.class);
         for (CatKey k : CatKey.values()) {
             map.put(k, 0.0);
         }
-        for (WeSaleLineItemRepository.CategoryQtyProjection p : lineItemRepository.sumSoldQtyByCategory()) {
+        for (WeSaleLineItemRepository.CategoryQtyProjection p : lineItemRepository.sumQtyByCategoryAndTypeBetween(WeSaleTxnType.SALE, com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day))) {
             map.put(p.getCategory(), p.getQty());
         }
         return map;
+    }
+
+    /**
+     * Daily rollover: each category's finished-day closing becomes the new
+     * opening (locked, like Bird Stock), and the day's committed crack/gift
+     * figures start again at zero. Sales are already per-day (date-scoped sums).
+     */
+    @Transactional
+    public void rollOver(LocalDate prevDay) {
+        Map<CatKey, Double> opening = categoryMap(WeCategoryValueKind.OPENING);
+        Map<CatKey, Double> crack = categoryMap(WeCategoryValueKind.SALES_CRACK);
+        Map<CatKey, Double> gift = categoryMap(WeCategoryValueKind.GIFT);
+        Map<CatKey, Double> production = productionService.catProdTotals(prevDay);
+        Map<CatKey, Double> sold = soldQtyByCategory(prevDay);
+        for (CatKey k : CatKey.values()) {
+            double closing = opening.get(k) + production.getOrDefault(k, 0.0) - sold.getOrDefault(k, 0.0) - gift.get(k) - crack.get(k);
+            setCategoryValue(WeCategoryValueKind.OPENING, k, closing);
+            setCategoryValue(WeCategoryValueKind.SALES_CRACK, k, 0);
+            setCategoryValue(WeCategoryValueKind.GIFT, k, 0);
+            lockService.lock(Mod.WHOLE_EGG, k.wire());
+        }
     }
 
     @Audited(module = Mod.WHOLE_EGG, action = "Update Opening Stock", detail = "#request.category() + ' -> ' + #request.value()")
@@ -170,7 +197,7 @@ public class WholeEggService {
         // fractional crates end-to-end too — no rounding boundary here
         // anymore (1 crate = 30 eggs, 0.5 crate = 15 eggs, etc.).
         Map<CatKey, Double> production = productionService.catProdTotals(LocalDate.now());
-        Map<CatKey, Double> sales = soldQtyByCategory();
+        Map<CatKey, Double> sales = soldQtyByCategory(LocalDate.now());
 
         List<StockRowResponse> rows = new ArrayList<>();
         for (CatKey k : CatKey.values()) {

@@ -126,9 +126,37 @@ public class MortalityService {
     /** Sum of today's pen entries for a category — mirrors ProductionService.catProdTotals. */
     @Transactional(readOnly = true)
     public int producedToday(MortCat category) {
-        return penEntryRepository.findAllByEntryDate(LocalDate.now()).stream()
+        return producedOn(category, LocalDate.now());
+    }
+
+    private int producedOn(MortCat category, LocalDate day) {
+        return penEntryRepository.findAllByEntryDate(day).stream()
                 .mapToInt(e -> e.get(category))
                 .sum();
+    }
+
+    /** Daily rollover — each category's finished-day closing becomes the new (locked) opening; gifts restart at zero. */
+    @Transactional
+    public void rollOver(LocalDate prevDay) {
+        MortCatfishDisposalState cd = catfishDisposalRepository.findByEntryDate(prevDay)
+                .orElseGet(() -> MortCatfishDisposalState.builder().entryDate(prevDay).build());
+        for (MortCat category : MortCat.values()) {
+            MortCategoryValue value = categoryValue(category);
+            int produced = producedOn(category, prevDay);
+            int sales = category.saleable()
+                    ? saleRepository.sumQtyByCategoryBetween(category, com.kingsfarm.kingsfarmbackend.common.AppDay.start(prevDay), com.kingsfarm.kingsfarmbackend.common.AppDay.end(prevDay))
+                    : 0;
+            int gift = category.saleable() ? value.getGiftQty() : 0;
+            int closing = switch (category) {
+                case GREEN -> value.getOpening() + produced - cd.getCatfishQty();
+                case PM_REJECT -> value.getOpening() + produced - cd.getDisposalQty();
+                default -> value.getOpening() + produced - sales - gift;
+            };
+            value.setOpening(closing);
+            value.setGiftQty(0);
+            categoryValueRepository.save(value);
+            lockService.lock(Mod.MORTALITY, category.wire());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -139,7 +167,9 @@ public class MortalityService {
     private MortCategoryStockRow stockRow(MortCat category) {
         MortCategoryValue value = peekCategoryValue(category);
         int produced = producedToday(category);
-        int sales = category.saleable() ? saleRepository.sumQtyByCategory(category) : 0;
+        int sales = category.saleable()
+                ? saleRepository.sumQtyByCategoryBetween(category, com.kingsfarm.kingsfarmbackend.common.AppDay.start(LocalDate.now()), com.kingsfarm.kingsfarmbackend.common.AppDay.end(LocalDate.now()))
+                : 0;
         int gift = category.saleable() ? value.getGiftQty() : 0;
         MortCatfishDisposalState cd = peekTodayCatfishDisposal();
         int catfish = category == MortCat.GREEN ? cd.getCatfishQty() : 0;

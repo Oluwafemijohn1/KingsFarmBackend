@@ -92,7 +92,34 @@ public class CrackEggService {
 
     @Transactional(readOnly = true)
     public double goodSalesQty() {
-        return saleRepository.sumQty();
+        return goodSalesQty(LocalDate.now());
+    }
+
+    @Transactional(readOnly = true)
+    public double goodSalesQty(LocalDate day) {
+        return saleRepository.sumQtyBetween(com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day));
+    }
+
+    /** Daily rollover — finished-day Good/Rough closing becomes the new (locked) opening; gift/sales/feed-mill start at zero. */
+    @Transactional
+    public void rollOver(LocalDate prevDay) {
+        CrackEggState s = state();
+        ProductionDayState prod = productionService.dayStateFor(prevDay);
+        double gcProduced = prod == null ? 0 : prod.getCrackGoodProd();
+        double gcReceived = prod == null ? 0 : prod.getGoodClassify();
+        double rcProduced = prod == null ? 0 : prod.getCrackRoughProd();
+        double rcReceived = prod == null ? 0 : prod.getRoughClassify();
+        double gcClosing = s.getGcOpening() + gcProduced + gcReceived - s.getGcGiftQty() - goodSalesQty(prevDay);
+        double rcClosing = s.getRcOpening() + rcProduced + rcReceived - s.getRcFeedMill();
+        s.setGcOpening(gcClosing);
+        s.setRcOpening(rcClosing);
+        s.setGcGiftQty(0);
+        s.setGcGiftRecipient("");
+        s.setGcGiftAuthorizer("");
+        s.setRcFeedMill(0);
+        stateRepository.save(s);
+        lockService.lock(Mod.CRACK_EGG, "good");
+        lockService.lock(Mod.CRACK_EGG, "rough");
     }
 
     // ── Stock summary ────────────────────────────────────────────────────
@@ -106,8 +133,8 @@ public class CrackEggService {
         double rcProduced = prod.getCrackRoughProd();
         double rcReceived = prod.getRoughClassify();
 
-        double gcTotalSales = saleRepository.sumQty();
-        double gcRevenue = saleRepository.sumRevenue();
+        double gcTotalSales = goodSalesQty();
+        double gcRevenue = saleRepository.sumRevenueBetween(com.kingsfarm.kingsfarmbackend.common.AppDay.start(LocalDate.now()), com.kingsfarm.kingsfarmbackend.common.AppDay.end(LocalDate.now()));
         double gcClosing = s.getGcOpening() + gcProduced + gcReceived - s.getGcGiftQty() - gcTotalSales;
         double rcClosing = s.getRcOpening() + rcProduced + rcReceived - s.getRcFeedMill();
 

@@ -15,6 +15,12 @@ public interface GcSaleTransactionRepository extends JpaRepository<GcSaleTransac
     @Query("select coalesce(sum(t.qty), 0) from GcSaleTransaction t")
     double sumQty();
 
+    @Query("select coalesce(sum(t.qty), 0) from GcSaleTransaction t where t.occurredAt >= :start and t.occurredAt < :end")
+    double sumQtyBetween(@org.springframework.data.repository.query.Param("start") Instant start, @org.springframework.data.repository.query.Param("end") Instant end);
+
+    @Query("select coalesce(sum(t.qty * t.price), 0) from GcSaleTransaction t where t.occurredAt >= :start and t.occurredAt < :end")
+    double sumRevenueBetween(@org.springframework.data.repository.query.Param("start") Instant start, @org.springframework.data.repository.query.Param("end") Instant end);
+
     @Query("select coalesce(sum(t.qty * t.price), 0) from GcSaleTransaction t")
     double sumRevenue();
 

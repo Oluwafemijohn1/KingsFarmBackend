@@ -15,6 +15,9 @@ public interface MortSaleEntryRepository extends JpaRepository<MortSaleEntry, Lo
     @Query("select coalesce(sum(e.qty), 0) from MortSaleEntry e where e.category = :category")
     int sumQtyByCategory(@Param("category") MortCat category);
 
+    @Query("select coalesce(sum(e.qty), 0) from MortSaleEntry e where e.category = :category and e.occurredAt >= :start and e.occurredAt < :end")
+    int sumQtyByCategoryBetween(@Param("category") MortCat category, @Param("start") Instant start, @Param("end") Instant end);
+
     @Query("select coalesce(sum(e.qty * e.price), 0) from MortSaleEntry e")
     long sumRevenue();
 

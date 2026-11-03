@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @org.springframework.cache.annotation.EnableCaching
 @org.springframework.scheduling.annotation.EnableAsync
+@org.springframework.scheduling.annotation.EnableScheduling
 @SpringBootApplication
 public class KingsFarmBackendApplication {
 

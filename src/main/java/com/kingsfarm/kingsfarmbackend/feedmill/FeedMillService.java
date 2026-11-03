@@ -578,12 +578,33 @@ public class FeedMillService {
      * case-insensitively, replacing whatever drifted value is currently
      * stored. Collected/opening are untouched — only "added" is resynced.
      */
-    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Added Stock", type = LogType.AUDIT, detail = "'Resynced Added from full production history'")
+    /** Daily rollover — every ingredient's and fish feed's closing becomes the new (locked) opening; added/used/collected restart at zero. */
+    @Transactional
+    public void rollOver() {
+        for (FeedIngredient i : ingredientRepository.findAll()) {
+            i.setOpening(i.closing());
+            i.setAdded(0);
+            i.setUsed(0);
+            ingredientRepository.save(i);
+            lockService.lock(Mod.FEED_MILL, i.getName());
+        }
+        for (FishFeedStock f : fishFeedStockRepository.findAll()) {
+            f.setOpening(f.closing());
+            f.setAdded(0);
+            f.setCollected(0);
+            fishFeedStockRepository.save(f);
+            lockService.lock(Mod.FEED_MILL, f.getType());
+        }
+    }
+
+    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Added Stock", type = LogType.AUDIT, detail = "'Resynced Added from today\'s production runs'")
     @Transactional
     public void recalculateFishFeedAdded() {
         Map<String, Double> totalsKg = new LinkedHashMap<>();
         for (String type : FISH_FEED_TYPES) totalsKg.put(type, 0.0);
+        java.time.Instant dayStart = com.kingsfarm.kingsfarmbackend.common.AppDay.start(java.time.LocalDate.now());
         for (FeedProductionLogEntry entry : productionRepository.findAll()) {
+            if (entry.getOccurredAt().isBefore(dayStart)) continue;
             String canonical = canonicalFishType(entry.getFeedType().getName());
             if (canonical != null) {
                 totalsKg.merge(canonical, entry.getQtyTons() * 1000, Double::sum);

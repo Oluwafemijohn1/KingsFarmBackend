@@ -19,6 +19,10 @@ public interface WeSaleLineItemRepository extends JpaRepository<WeSaleLineItem, 
             "where li.transaction.type = :type group by li.category")
     List<CategoryQtyProjection> sumQtyByCategoryAndType(@Param("type") WeSaleTxnType type);
 
+    @Query("select li.category as category, coalesce(sum(li.qty), 0) as qty from WeSaleLineItem li " +
+            "where li.transaction.type = :type and li.transaction.occurredAt >= :start and li.transaction.occurredAt < :end group by li.category")
+    List<CategoryQtyProjection> sumQtyByCategoryAndTypeBetween(@Param("type") WeSaleTxnType type, @Param("start") Instant start, @Param("end") Instant end);
+
     default List<CategoryQtyProjection> sumSoldQtyByCategory() {
         return sumQtyByCategoryAndType(WeSaleTxnType.SALE);
     }
