@@ -4,27 +4,25 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * Mirrors shared.ts's CatKey/CAT_KEYS/CAT_LABELS/CRACK_WEIGHTS exactly — the
+ * Mirrors shared.ts's CatKey/CAT_KEYS/CAT_LABELS exactly — the
  * six egg categories shared across Production, Whole Egg, Crack Egg, and
  * Mortality. Do not add/rename/remove a value without updating the frontend
  * and BACKEND_PLAN.md at the same time.
  */
 public enum CatKey {
-    X_LARGE("xL", "X-Large", 1.0),
-    LARGE("lg", "Large", 1.0),
-    MEDIUM("md", "Medium", 3.0),
-    SMALL("sm", "Small", 1.0),
-    PULLET("pl", "Pullet", 0.5),
-    WHITE("wh", "White", 1.0);
+    X_LARGE("xL", "X-Large"),
+    LARGE("lg", "Large"),
+    MEDIUM("md", "Medium"),
+    SMALL("sm", "Small"),
+    PULLET("pl", "Pullet"),
+    WHITE("wh", "White");
 
     private final String wire;
     private final String label;
-    private final double crackWeight;
 
-    CatKey(String wire, String label, double crackWeight) {
+    CatKey(String wire, String label) {
         this.wire = wire;
         this.label = label;
-        this.crackWeight = crackWeight;
     }
 
     @JsonValue
@@ -35,11 +33,6 @@ public enum CatKey {
     /** Display label matching CAT_LABELS in shared.ts (e.g. "X-Large"). */
     public String label() {
         return label;
-    }
-
-    /** Pieces-per-cracked-egg-unit weight matching CRACK_WEIGHTS in shared.ts — used to convert Whole Egg's per-category Sales Crack into Production's single Crack Use total. */
-    public double crackWeight() {
-        return crackWeight;
     }
 
     @JsonCreator
