@@ -315,7 +315,7 @@ public class ProductionService {
 
         double totalCrackFromWhole = 0;
         for (CatKey k : CatKey.values()) {
-            totalCrackFromWhole += wholeEggCrackUse(k) * k.crackWeight();
+            totalCrackFromWhole += wholeEggCrackUse(k);
         }
         double classifyTotal = state.getGoodClassify() + state.getRoughClassify();
         boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
