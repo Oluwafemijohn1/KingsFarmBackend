@@ -181,6 +181,16 @@ public class ProductionService {
         return wholeEggService.totalSalesFor(category);
     }
 
+    private double wholeEggTotalSales(CatKey category, LocalDate day) {
+        return wholeEggService.totalSalesFor(category, day);
+    }
+
+    /** The saved day state for a specific date, or null if none exists (used by the nightly rollover). */
+    @Transactional(readOnly = true)
+    public ProductionDayState dayStateFor(LocalDate day) {
+        return dayStateRepository.findByEntryDate(day).orElse(null);
+    }
+
     private double wholeEggGift(CatKey category) {
         return wholeEggService.giftFor(category);
     }
@@ -214,7 +224,7 @@ public class ProductionService {
                 LocalDate prevDate = previous.getEntryDate();
                 for (CatKey k : CatKey.values()) {
                     double prevProd = catProdTotals(prevDate).get(k);
-                    double prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k) - wholeEggGift(k);
+                    double prevClosing = previous.catOpening(k) + prevProd - wholeEggCrackUse(k) - wholeEggTotalSales(k, prevDate) - wholeEggGift(k);
                     builder = switch (k) {
                         case X_LARGE -> builder.catOpeningXl(prevClosing);
                         case LARGE -> builder.catOpeningLg(prevClosing);
@@ -224,7 +234,7 @@ public class ProductionService {
                         case WHITE -> builder.catOpeningWh(prevClosing);
                     };
                 }
-                double prevCrackGoodClosing = previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggGoodSales();
+                double prevCrackGoodClosing = previous.getCrackGoodOpen() + previous.getCrackGoodProd() + previous.getGoodClassify() - crackEggGoodGift() - crackEggService.goodSalesQty(prevDate);
                 double prevCrackRoughClosing = previous.getCrackRoughOpen() + previous.getCrackRoughProd() + previous.getRoughClassify();
                 builder = builder.crackGoodOpen(prevCrackGoodClosing).crackRoughOpen(prevCrackRoughClosing);
             }
