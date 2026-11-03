@@ -318,9 +318,8 @@ public class ProductionService {
             totalCrackFromWhole += wholeEggCrackUse(k);
         }
         double classifyTotal = state.getGoodClassify() + state.getRoughClassify();
-        // Crack Manager classifies Whole Egg crack use PLUS what Production itself recorded as cracked.
-        double toClassify = totalCrackFromWhole + state.getCrackGoodProd() + state.getCrackRoughProd();
-        boolean mismatch = Math.abs(classifyTotal - toClassify) > 0.01;
+        // Crack Manager classifies ONLY the Whole Egg crack use; Production classifies its own crack (crackGoodProd/crackRoughProd).
+        boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
 
         double giftAuto = crackEggGoodGift();
         double salesAuto = crackEggGoodSales();
