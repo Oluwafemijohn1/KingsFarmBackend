@@ -33,6 +33,12 @@ public class ProductionController {
         return service.getTodayPenEntries();
     }
 
+    /** Pen entries for a chosen day (defaults to today). Past days are read-only unless inside the grace window or approved. */
+    @GetMapping("/pen-entries")
+    public List<ProductionPenEntryResponse> getPenEntries(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.getPenEntriesFor(date);
+    }
+
     @PatchMapping("/pen-entries/{penId}")
     @PreAuthorize("hasRole('PRODUCTION_MANAGER')")
     public ProductionPenEntryResponse updatePenEntry(@AuthenticationPrincipal AuthenticatedPrincipal principal,
@@ -55,6 +61,13 @@ public class ProductionController {
     @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
     public ProductionDayStateResponse getTodayDayState() {
         return service.toResponse(service.getTodayDayState());
+    }
+
+    /** Day state for a chosen day (defaults to today) — the Crack Egg page's day picker. */
+    @GetMapping("/day-state")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
+    public ProductionDayStateResponse getDayState(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.toResponse(service.dayStateForView(date));
     }
 
     @PatchMapping("/day-state/cat-opening")

@@ -44,6 +44,10 @@ import java.util.stream.Collectors;
 @Service
 public class FeedMillService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
+
     private static final ZoneId ZONE = ZoneId.systemDefault();
     private static final double FORMULATION_TARGET_KG = 1000;
     private static final double FORMULATION_TOLERANCE_KG = 5;
@@ -165,6 +169,22 @@ public class FeedMillService {
     @Transactional(readOnly = true)
     public boolean isIngredientOpeningLocked(String name) {
         return lockService.isLocked(Mod.FEED_MILL, name);
+    }
+
+    /** Ingredient stock received on a finished day: added to that day, so the live opening (which later days build on) rises by it. */
+    @Audited(module = Mod.FEED_MILL, action = "Record Past-day Restock", type = LogType.AUDIT, detail = "'Ingredient ' + #name + ' +' + #request.qty() + ' on ' + #request.date()")
+    @Transactional
+    public void restockPastDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        LocalDate day = resolveEntryDay(request.date());
+        if (day.isEqual(LocalDate.now())) {
+            throw new BadRequestException("For today, use the Added field.");
+        }
+        FeedIngredient ingredient = ingredient(name);
+        if (ingredient.getOpening() + request.qty() < 0) {
+            throw new BadRequestException("That would make this ingredient's stock negative.");
+        }
+        ingredient.setOpening(ingredient.getOpening() + request.qty());
+        ingredientRepository.save(ingredient);
     }
 
     @Transactional
@@ -379,13 +399,56 @@ public class FeedMillService {
             throw new BadRequestException("Insufficient ingredient stock. Resolve shortfalls before producing.");
         }
         FeedType feedType = feedType(request.feedTypeId());
-        deductIngredients(feedType, request.qtyTons());
-        transferToFishFeed(feedType.getName(), request.qtyTons() * 1000);
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
+        if (past) {
+            for (FeedFormulationEntry e : formulationRepository.findAllByFeedType(feedType)) {
+                carryIngredientUse(e.getIngredient(), round1(e.getQtyPerTon() * request.qtyTons()));
+            }
+            String fish = canonicalFishType(feedType.getName());
+            if (fish != null) {
+                carryFishFeed(fish, request.qtyTons() * 1000, 0);
+            }
+        } else {
+            deductIngredients(feedType, request.qtyTons());
+            transferToFishFeed(feedType.getName(), request.qtyTons() * 1000);
+        }
 
         FeedProductionLogEntry entry = FeedProductionLogEntry.builder()
                 .feedType(feedType).qtyTons(request.qtyTons()).enteredBy(username)
+                .occurredAt(past ? middayOf(day) : null)
                 .build();
         return productionRepository.save(entry);
+    }
+
+    /** The day an entry is for: null = today; future refused; a past day must be inside the grace window or approved. */
+    private LocalDate resolveEntryDay(LocalDate requested) {
+        LocalDate today = LocalDate.now();
+        LocalDate day = requested == null ? today : requested;
+        if (day.isAfter(today)) {
+            throw new BadRequestException("You can't enter records for a future date.");
+        }
+        if (!day.isEqual(today) && !editWindow.isOpen(Mod.FEED_MILL, day)) {
+            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+        }
+        return day;
+    }
+
+    private Instant middayOf(LocalDate day) {
+        return day.atTime(12, 0).atZone(ZONE).toInstant();
+    }
+
+    /** A finished day's ingredient usage changed by {@code delta} (positive = more used): that day's closing, and so the live opening, moves the other way. */
+    private void carryIngredientUse(FeedIngredient ingredient, double delta) {
+        ingredient.setOpening(ingredient.getOpening() - delta);
+        ingredientRepository.save(ingredient);
+    }
+
+    /** A finished day's fish feed added / collected changed: positive {@code addedDelta} raises the live opening, positive {@code collectedDelta} lowers it. */
+    private void carryFishFeed(String type, double addedDelta, double collectedDelta) {
+        FishFeedStock stock = fishFeedStock(type);
+        stock.setOpening(stock.getOpening() + addedDelta - collectedDelta);
+        fishFeedStockRepository.save(stock);
     }
 
     private void deductIngredients(FeedType feedType, double qtyTons) {
@@ -436,6 +499,7 @@ public class FeedMillService {
         if (!isEditable(entry.getOccurredAt())) {
             throw new ForbiddenException("This run was recorded on a previous day and can no longer be edited.");
         }
+        boolean pastEntry = entry.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now());
         FeedType oldType = entry.getFeedType();
         double oldQty = entry.getQtyTons();
         FeedType newType = feedType(request.feedTypeId());
@@ -460,21 +524,33 @@ public class FeedMillService {
         for (FeedIngredient ingredient : touched.values()) {
             double oldDeduct = round1(oldQtyPerTon.getOrDefault(ingredient.getId(), 0.0) * oldQty);
             double newDeduct = round1(newQtyPerTon.getOrDefault(ingredient.getId(), 0.0) * newQty);
-            ingredient.setUsed(ingredient.getUsed() - oldDeduct + newDeduct);
-            ingredientRepository.save(ingredient);
+            if (pastEntry) {
+                carryIngredientUse(ingredient, newDeduct - oldDeduct);
+            } else {
+                ingredient.setUsed(ingredient.getUsed() - oldDeduct + newDeduct);
+                ingredientRepository.save(ingredient);
+            }
         }
 
         String oldFishType = canonicalFishType(oldType.getName());
         String newFishType = canonicalFishType(newType.getName());
         if (oldFishType != null) {
-            FishFeedStock stock = fishFeedStock(oldFishType);
-            stock.setAdded(stock.getAdded() - oldQty * 1000);
-            fishFeedStockRepository.save(stock);
+            if (pastEntry) {
+                carryFishFeed(oldFishType, -oldQty * 1000, 0);
+            } else {
+                FishFeedStock stock = fishFeedStock(oldFishType);
+                stock.setAdded(stock.getAdded() - oldQty * 1000);
+                fishFeedStockRepository.save(stock);
+            }
         }
         if (newFishType != null) {
-            FishFeedStock stock = fishFeedStock(newFishType);
-            stock.setAdded(stock.getAdded() + newQty * 1000);
-            fishFeedStockRepository.save(stock);
+            if (pastEntry) {
+                carryFishFeed(newFishType, newQty * 1000, 0);
+            } else {
+                FishFeedStock stock = fishFeedStock(newFishType);
+                stock.setAdded(stock.getAdded() + newQty * 1000);
+                fishFeedStockRepository.save(stock);
+            }
         }
 
         entry.setFeedType(newType);
@@ -484,7 +560,7 @@ public class FeedMillService {
     }
 
     public boolean isEditable(Instant occurredAt) {
-        return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.FEED_MILL, occurredAt.atZone(ZONE).toLocalDate());
     }
 
     // Maps to the DTO here, inside the transaction, rather than handing the
@@ -662,16 +738,26 @@ public class FeedMillService {
         if (f > finisher.closing()) {
             throw new BadRequestException("Fish Finisher: only " + finisher.closing() + " kg available.");
         }
-        starter.setCollected(starter.getCollected() + s);
-        grower.setCollected(grower.getCollected() + g);
-        finisher.setCollected(finisher.getCollected() + f);
-        fishFeedStockRepository.save(starter);
-        fishFeedStockRepository.save(grower);
-        fishFeedStockRepository.save(finisher);
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
+        if (past) {
+            // Finished day: its closing fell, so the live opening falls by the same amount.
+            carryFishFeed("Fish Starter", 0, s);
+            carryFishFeed("Fish Grower", 0, g);
+            carryFishFeed("Fish Finisher", 0, f);
+        } else {
+            starter.setCollected(starter.getCollected() + s);
+            grower.setCollected(grower.getCollected() + g);
+            finisher.setCollected(finisher.getCollected() + f);
+            fishFeedStockRepository.save(starter);
+            fishFeedStockRepository.save(grower);
+            fishFeedStockRepository.save(finisher);
+        }
 
         FeedCollectionLogEntry entry = FeedCollectionLogEntry.builder()
                 .collectedBy(request.collectedBy()).fishStarterKg(s).fishGrowerKg(g).fishFinisherKg(f)
                 .enteredBy(username)
+                .occurredAt(past ? middayOf(day) : null)
                 .build();
         return collectionRepository.save(entry);
     }
@@ -687,12 +773,18 @@ public class FeedMillService {
         FishFeedStock starter = fishFeedStock("Fish Starter");
         FishFeedStock grower = fishFeedStock("Fish Grower");
         FishFeedStock finisher = fishFeedStock("Fish Finisher");
-        starter.setCollected(starter.getCollected() - entry.getFishStarterKg() + request.fishStarterKg());
-        grower.setCollected(grower.getCollected() - entry.getFishGrowerKg() + request.fishGrowerKg());
-        finisher.setCollected(finisher.getCollected() - entry.getFishFinisherKg() + request.fishFinisherKg());
-        fishFeedStockRepository.save(starter);
-        fishFeedStockRepository.save(grower);
-        fishFeedStockRepository.save(finisher);
+        if (entry.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now())) {
+            carryFishFeed("Fish Starter", 0, request.fishStarterKg() - entry.getFishStarterKg());
+            carryFishFeed("Fish Grower", 0, request.fishGrowerKg() - entry.getFishGrowerKg());
+            carryFishFeed("Fish Finisher", 0, request.fishFinisherKg() - entry.getFishFinisherKg());
+        } else {
+            starter.setCollected(starter.getCollected() - entry.getFishStarterKg() + request.fishStarterKg());
+            grower.setCollected(grower.getCollected() - entry.getFishGrowerKg() + request.fishGrowerKg());
+            finisher.setCollected(finisher.getCollected() - entry.getFishFinisherKg() + request.fishFinisherKg());
+            fishFeedStockRepository.save(starter);
+            fishFeedStockRepository.save(grower);
+            fishFeedStockRepository.save(finisher);
+        }
 
         entry.setCollectedBy(request.collectedBy());
         entry.setFishStarterKg(request.fishStarterKg());

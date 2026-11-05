@@ -97,6 +97,10 @@ public class ProductionDayState {
     @Builder.Default
     private double roughClassify = 0;
 
+    /** Whole Egg's crack use for this day, frozen at the nightly rollover (the live figure resets) — null for days before this existed. */
+    @Column(name = "crack_from_whole_snapshot")
+    private Double crackFromWholeSnapshot;
+
     @Column(name = "entered_by", length = 64)
     private String enteredBy;
 

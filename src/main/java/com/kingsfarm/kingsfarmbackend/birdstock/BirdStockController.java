@@ -60,6 +60,12 @@ public class BirdStockController {
         return service.getTodayRecords();
     }
 
+    /** Records for a chosen day (defaults to today). Past days are read-only unless inside the grace window or approved. */
+    @GetMapping("/records")
+    public List<BirdPenRecordResponse> getRecords(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.getRecordsFor(date);
+    }
+
     @PatchMapping("/records/{penId}")
     @PreAuthorize("hasRole('PRODUCTION_MANAGER')")
     public BirdPenRecordResponse updateRecord(@AuthenticationPrincipal AuthenticatedPrincipal principal,

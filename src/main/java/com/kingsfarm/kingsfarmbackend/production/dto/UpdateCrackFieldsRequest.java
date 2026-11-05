@@ -14,6 +14,8 @@ public record UpdateCrackFieldsRequest(
         @DecimalMin("0") Double crackGoodOpen,
         @DecimalMin("0") Double crackRoughOpen,
         @DecimalMin("0") Double crackGoodProd,
-        @DecimalMin("0") Double crackRoughProd
+        @DecimalMin("0") Double crackRoughProd,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

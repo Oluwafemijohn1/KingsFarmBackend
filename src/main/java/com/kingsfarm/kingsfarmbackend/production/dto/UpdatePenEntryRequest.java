@@ -11,6 +11,8 @@ import jakarta.validation.constraints.NotNull;
  */
 public record UpdatePenEntryRequest(
         @NotNull CatKey category,
-        @DecimalMin("0") double qty
+        @DecimalMin("0") double qty,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

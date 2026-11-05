@@ -19,6 +19,7 @@ import java.util.HexFormat;
 @Service
 public class AccountSetupService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AccountSetupService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final AccountTokenRepository tokens;
@@ -26,22 +27,32 @@ public class AccountSetupService {
     private final PasswordEncoder passwordEncoder;
     private final SecuritySettingsService securitySettings;
     private final EmailService emailService;
+    private final NotificationService notifications;
+    private final RefreshTokenRepository refreshTokens;
     private final int tokenHours;
 
     public AccountSetupService(AccountTokenRepository tokens, UserRepository users, PasswordEncoder passwordEncoder,
                                SecuritySettingsService securitySettings, EmailService emailService,
+                               NotificationService notifications, RefreshTokenRepository refreshTokens,
                                @Value("${app.mail.token-hours:48}") int tokenHours) {
         this.tokens = tokens;
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.securitySettings = securitySettings;
         this.emailService = emailService;
+        this.notifications = notifications;
+        this.refreshTokens = refreshTokens;
         this.tokenHours = tokenHours;
     }
 
     /** Invalidates any earlier links for the user, mints a new one and emails it. @return whether the email was sent. */
     @Transactional
     public boolean issueAndSend(User user, boolean passwordReset) {
+        String raw = mintToken(user, passwordReset);
+        return emailService.sendAccountSetup(user, raw, passwordReset, tokenHours);
+    }
+
+    private String mintToken(User user, boolean passwordReset) {
         tokens.deleteAllForUser(user);
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
@@ -53,7 +64,7 @@ public class AccountSetupService {
         t.setPurpose(passwordReset ? AccountTokenPurpose.RESET_PASSWORD : AccountTokenPurpose.VERIFY_EMAIL);
         t.setExpiresAt(Instant.now().plus(Duration.ofHours(tokenHours)));
         tokens.save(t);
-        return emailService.sendAccountSetup(user, raw, passwordReset, tokenHours);
+        return raw;
     }
 
     /**
@@ -63,9 +74,22 @@ public class AccountSetupService {
      */
     @Transactional
     public void requestReset(String email) {
-        users.findByUsername(email.trim().toLowerCase())
+        String normalized = email.trim().toLowerCase();
+        User found = users.findByUsername(normalized).orElse(null);
+        if (found == null) {
+            log.info("Password reset requested for {} - no account with that email (nothing sent).", normalized);
+        } else if (!found.isActive()) {
+            log.info("Password reset requested for {} - account is inactive (nothing sent).", normalized);
+        } else {
+            log.info("Password reset requested for {} - link issued.", normalized);
+        }
+        java.util.Optional.ofNullable(found)
                 .filter(User::isActive)
-                .ifPresent(u -> issueAndSend(u, u.isEmailVerified()));
+                .ifPresent(u -> {
+                    boolean reset = u.isEmailVerified();
+                    String raw = mintToken(u, reset);
+                    notifications.accountSetup(u, raw, reset, tokenHours);
+                });
     }
 
     /** Lets the setup page show who the link is for before they type a password. */
@@ -92,6 +116,8 @@ public class AccountSetupService {
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         users.save(user);
+        // A reset must end every existing session — someone may have been signed in on a lost device.
+        refreshTokens.revokeAllForUser(user, Instant.now());
         t.setUsedAt(Instant.now());
         tokens.save(t);
     }

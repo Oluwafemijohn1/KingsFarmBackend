@@ -44,6 +44,10 @@ import java.util.stream.Collectors;
 @Service
 public class WholeEggService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
+
     private static final ZoneId ZONE = ZoneId.systemDefault();
 
     private final CustomerRepository customerRepository;
@@ -153,6 +157,12 @@ public class WholeEggService {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
         }
         setCategoryValue(WeCategoryValueKind.OPENING, request.category(), request.value());
+    }
+
+    /** System adjustment (not a manager edit, so it ignores the opening-stock lock): shifts the live opening by a recalculation delta. */
+    @Transactional
+    public void adjustOpening(CatKey category, double delta) {
+        setCategoryValue(WeCategoryValueKind.OPENING, category, categoryValue(WeCategoryValueKind.OPENING, category) + delta);
     }
 
     @Transactional
@@ -371,6 +381,67 @@ public class WholeEggService {
                 .orElse(0.0);
     }
 
+    // ── Back-dated entries ────────────────────────────────────────────────
+
+    /** The day an entry is for: null means today; future is refused; a past day must be inside the grace window or approved. */
+    private LocalDate resolveEntryDay(LocalDate requested) {
+        LocalDate today = LocalDate.now();
+        LocalDate day = requested == null ? today : requested;
+        if (day.isAfter(today)) {
+            throw new BadRequestException("You can't enter records for a future date.");
+        }
+        if (!day.isEqual(today) && !editWindow.isOpen(Mod.WHOLE_EGG, day)) {
+            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+        }
+        return day;
+    }
+
+    /** Midday on a past day, so it sorts inside that day's reports; null for today (the entity stamps "now"). */
+    private Instant occurredAtFor(LocalDate day) {
+        return day.isEqual(LocalDate.now()) ? null : day.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant();
+    }
+
+    /**
+     * Each transaction stores the customer's running balance after it. When an
+     * entry is inserted or changed in the past, every later transaction of that
+     * customer has to be re-walked so the balances stay correct.
+     */
+    private void recomputeLedger(Customer customer) {
+        double running = 0;
+        for (WeSaleTransaction t : transactionRepository.findAllByCustomerOrderByOccurredAtAsc(customer)) {
+            if (t.getType() == WeSaleTxnType.OPENING) {
+                running = t.getCredit() - t.getAdvance();
+                continue;
+            }
+            double due = lineItemRepository.findAllByTransaction(t).stream().mapToDouble(i -> i.getQty() * i.getPrice()).sum();
+            double remaining = due + running - t.getAmountPaid();
+            t.setCredit(Math.max(remaining, 0));
+            t.setAdvance(Math.max(-remaining, 0));
+            transactionRepository.save(t);
+            running = remaining;
+        }
+    }
+
+    /** Adds crack use / gifts that belong to a day that has already closed; later days' stock follows. */
+    @Audited(module = Mod.WHOLE_EGG, action = "Record Past-day Crack/Gift", type = LogType.AUDIT,
+            detail = "#request.kind() + ' for ' + #request.date()")
+    @Transactional
+    public void recordPastAdjustment(PastAdjustmentRequest request) {
+        LocalDate day = resolveEntryDay(request.date());
+        if (day.isEqual(LocalDate.now())) {
+            throw new BadRequestException("For today, use the normal Commit button.");
+        }
+        double crackTotal = 0;
+        for (CategoryQtyEntry e : request.values()) {
+            if (e.qty() <= 0) continue;
+            productionService.carryDeltaForward(day, e.category(), -e.qty());
+            crackTotal += e.qty();
+        }
+        if (request.kind() == PastAdjustmentRequest.Kind.CRACK && crackTotal > 0) {
+            productionService.addCrackSnapshot(day, crackTotal);
+        }
+    }
+
     // ── Sales / Payments ──────────────────────────────────────────────────
 
     @Audited(module = Mod.WHOLE_EGG, action = "Record Sale", type = LogType.AUDIT,
@@ -380,6 +451,9 @@ public class WholeEggService {
         Customer customer = customerRepository.findById(request.customerId())
                 .orElseThrow(() -> new NotFoundException("Customer not found."));
 
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
+        Instant when = occurredAtFor(day);
         double totalQty = request.items().stream().mapToDouble(SaleLineItemRequest::qty).sum();
         if (totalQty <= 0) {
             throw new BadRequestException("Enter at least one category quantity.");
@@ -396,12 +470,15 @@ public class WholeEggService {
 
         // Sales Amount = Quantity Sold × Price per Crate — must stay fractional (e.g. 0.5 crate × ₦4,000 = ₦2,000), never truncated to a long.
         double totalDue = request.items().stream().mapToDouble(i -> i.qty() * i.price()).sum();
-        double priorBalance = customerBalance(customer);
+        double priorBalance = past
+                ? transactionRepository.findFirstByCustomerAndOccurredAtLessThanOrderByOccurredAtDesc(customer, when).map(t -> t.getCredit() - t.getAdvance()).orElse(0.0)
+                : customerBalance(customer);
         long amountPaid = pay.cash() + pay.transferTotal();
         double remaining = totalDue + priorBalance - amountPaid;
 
         WeSaleTransaction txn = WeSaleTransaction.builder()
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
+                .occurredAt(when)
                 .type(WeSaleTxnType.SALE)
                 .paymentMethods(new HashSet<>(request.paymentMethods()))
                 .bank(pay.bankLabel()).transfers(new ArrayList<>(pay.transfers()))
@@ -415,6 +492,14 @@ public class WholeEggService {
             if (item.qty() <= 0) continue;
             lineItemRepository.save(WeSaleLineItem.builder().transaction(txn).category(item.category()).qty(item.qty()).price(item.price()).build());
         }
+        if (past) {
+            recomputeLedger(customer);
+            for (SaleLineItemRequest item : request.items()) {
+                if (item.qty() > 0) {
+                    productionService.carryDeltaForward(day, item.category(), -item.qty());
+                }
+            }
+        }
         return txn;
     }
 
@@ -424,8 +509,13 @@ public class WholeEggService {
         Customer customer = customerRepository.findById(request.customerId())
                 .orElseThrow(() -> new NotFoundException("Customer not found."));
 
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
+        Instant when = occurredAtFor(day);
         Payment pay = resolvePayment(request.paymentMethods(), request.bank(), request.transfers(), request.cashAmount(), request.transferAmount());
-        double balanceOwed = customerBalance(customer);
+        double balanceOwed = past
+                ? transactionRepository.findFirstByCustomerAndOccurredAtLessThanOrderByOccurredAtDesc(customer, when).map(t -> t.getCredit() - t.getAdvance()).orElse(0.0)
+                : customerBalance(customer);
         long amountPaid = pay.cash() + pay.transferTotal();
         if (amountPaid <= 0) {
             throw new BadRequestException("Enter the amount being paid.");
@@ -434,6 +524,7 @@ public class WholeEggService {
 
         WeSaleTransaction txn = WeSaleTransaction.builder()
                 .customer(customer).customerNameSnapshot(customer.fullName()).state(customer.getState())
+                .occurredAt(when)
                 .type(WeSaleTxnType.PAYMENT)
                 .paymentMethods(new HashSet<>(request.paymentMethods()))
                 .bank(pay.bankLabel()).transfers(new ArrayList<>(pay.transfers()))
@@ -441,7 +532,11 @@ public class WholeEggService {
                 .credit(Math.max(remaining, 0)).advance(Math.max(-remaining, 0))
                 .enteredBy(username)
                 .build();
-        return transactionRepository.save(txn);
+        txn = transactionRepository.save(txn);
+        if (past) {
+            recomputeLedger(customer);
+        }
+        return txn;
     }
 
     @Audited(module = Mod.WHOLE_EGG, action = "Edit Transaction", type = LogType.AUDIT, detail = "'Transaction #' + #id")
@@ -463,6 +558,10 @@ public class WholeEggService {
         long amountPaid = pay.cash() + pay.transferTotal();
         double remaining = totalDue + priorBalance - amountPaid;
 
+        java.util.Map<CatKey, Double> oldQty = new java.util.EnumMap<>(CatKey.class);
+        for (WeSaleLineItem old : lineItemRepository.findAllByTransaction(txn)) {
+            oldQty.merge(old.getCategory(), old.getQty(), Double::sum);
+        }
         lineItemRepository.deleteAllByTransaction(txn);
         for (SaleLineItemRequest item : items) {
             if (item.qty() <= 0) continue;
@@ -479,7 +578,22 @@ public class WholeEggService {
         txn.setCredit(Math.max(remaining, 0));
         txn.setAdvance(Math.max(-remaining, 0));
         txn.setUpdatedBy(username);
-        return transactionRepository.save(txn);
+        txn = transactionRepository.save(txn);
+        LocalDate txnDay = txn.getOccurredAt().atZone(ZONE).toLocalDate();
+        if (txnDay.isBefore(LocalDate.now())) {
+            recomputeLedger(txn.getCustomer());
+            if (txn.getType() == WeSaleTxnType.SALE) {
+                java.util.Map<CatKey, Double> newQty = new java.util.EnumMap<>(CatKey.class);
+                for (SaleLineItemRequest item : items) {
+                    if (item.qty() > 0) newQty.merge(item.category(), item.qty(), Double::sum);
+                }
+                for (CatKey k : CatKey.values()) {
+                    double delta = newQty.getOrDefault(k, 0.0) - oldQty.getOrDefault(k, 0.0);
+                    productionService.carryDeltaForward(txnDay, k, -delta);
+                }
+            }
+        }
+        return txn;
     }
 
     /** Everything derived from the payment part of a request, already validated. */
@@ -529,7 +643,7 @@ public class WholeEggService {
     }
 
     public boolean isEditable(WeSaleTransaction txn) {
-        return txn.getOccurredAt().atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.WHOLE_EGG, txn.getOccurredAt().atZone(ZONE).toLocalDate());
     }
 
     // ── Responses / history ──────────────────────────────────────────────

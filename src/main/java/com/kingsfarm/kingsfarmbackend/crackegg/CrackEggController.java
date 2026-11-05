@@ -62,6 +62,12 @@ public class CrackEggController {
         service.setGcSellingPrice(request);
     }
 
+    @PostMapping("/past-adjustments")
+    @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
+    public void recordPastAdjustment(@Valid @RequestBody com.kingsfarm.kingsfarmbackend.crackegg.dto.PastCrackAdjustmentRequest request) {
+        service.recordPastAdjustment(request);
+    }
+
     @PatchMapping("/stock/feed-mill")
     @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
     public void setFeedMillUsage(@Valid @RequestBody UpdateIntValueRequest request) {

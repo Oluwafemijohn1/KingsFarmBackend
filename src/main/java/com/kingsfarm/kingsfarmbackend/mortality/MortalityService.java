@@ -41,6 +41,10 @@ import java.util.stream.Collectors;
 @Service
 public class MortalityService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
+
     private static final ZoneId ZONE = ZoneId.systemDefault();
     private static final int GOOD_OPENING_DEFAULT = 0;
     private static final int DRY_OPENING_DEFAULT = 0;
@@ -210,6 +214,52 @@ public class MortalityService {
                 .toList();
     }
 
+    /** The day an entry is for: null = today; future refused; a past day must be inside the grace window or approved. */
+    private LocalDate resolveEntryDay(LocalDate requested) {
+        LocalDate today = LocalDate.now();
+        LocalDate day = requested == null ? today : requested;
+        if (day.isAfter(today)) {
+            throw new BadRequestException("You can't enter records for a future date.");
+        }
+        if (!day.isEqual(today) && !editWindow.isOpen(Mod.MORTALITY, day)) {
+            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+        }
+        return day;
+    }
+
+    /**
+     * A finished day's closing stock for this category changed by {@code delta}, so the live
+     * opening (which every later day builds on) moves by the same amount. System
+     * adjustment — not a manager edit, so it ignores the opening-stock lock.
+     */
+    private void carryDelta(MortCat category, int delta) {
+        if (delta == 0) {
+            return;
+        }
+        MortCategoryValue value = categoryValue(category);
+        if (value.getOpening() + delta < 0) {
+            throw new BadRequestException("This change would make " + category + " stock negative on a later day.");
+        }
+        value.setOpening(value.getOpening() + delta);
+        categoryValueRepository.save(value);
+    }
+
+    /** Pen entries for any day; a past day only creates missing rows when the caller may edit it. */
+    @Transactional
+    public List<MortPenEntryResponse> getPenEntriesFor(LocalDate date) {
+        if (date == null || date.isEqual(LocalDate.now())) {
+            return getTodayPenEntries();
+        }
+        boolean canEdit = isEditable(date);
+        return penRepository.findAllByActiveTrueOrderByNameAsc().stream()
+                .map(pen -> canEdit
+                        ? java.util.Optional.of(findOrCreateTodayEntry(pen, date))
+                        : penEntryRepository.findByPenAndEntryDate(pen, date))
+                .flatMap(java.util.Optional::stream)
+                .map(e -> MortPenEntryResponse.from(e, isEditable(e.getEntryDate())))
+                .toList();
+    }
+
     private MortPenEntry findOrCreateTodayEntry(Pen pen, LocalDate today) {
         return penEntryRepository.findByPenAndEntryDate(pen, today)
                 .orElseGet(() -> penEntryRepository.save(MortPenEntry.builder().pen(pen).entryDate(today).build()));
@@ -220,11 +270,12 @@ public class MortalityService {
     @Transactional
     public MortPenEntryResponse updatePenEntry(Long penId, UpdateMortPenEntryRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
-        LocalDate today = LocalDate.now();
-        MortPenEntry entry = findOrCreateTodayEntry(pen, today);
+        LocalDate day = resolveEntryDay(request.date());
+        MortPenEntry entry = findOrCreateTodayEntry(pen, day);
         if (!isEditable(entry.getEntryDate())) {
             throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
         }
+        int before = entry.get(request.category());
         entry.set(request.category(), request.qty());
         if (entry.getEnteredBy() == null) {
             entry.setEnteredBy(username);
@@ -232,11 +283,14 @@ public class MortalityService {
             entry.setUpdatedBy(username);
         }
         MortPenEntry saved = penEntryRepository.save(entry);
+        if (day.isBefore(LocalDate.now())) {
+            carryDelta(request.category(), request.qty() - before);
+        }
         return MortPenEntryResponse.from(saved, isEditable(saved.getEntryDate()));
     }
 
     public boolean isEditable(LocalDate entryDate) {
-        return entryDate.isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.MORTALITY, entryDate);
     }
 
     // ── Sales ─────────────────────────────────────────────────────────────
@@ -248,6 +302,8 @@ public class MortalityService {
             throw new BadRequestException("Sales are only allowed for Good, Dry, and Runt.");
         }
         validatePaymentMethods(request.paymentMethods(), request.bank());
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
 
         int available = closingFor(request.category());
         if (request.qty() > available) {
@@ -266,7 +322,14 @@ public class MortalityService {
                 .credit(request.credit()).advance(request.advance())
                 .enteredBy(username)
                 .build();
-        return saleRepository.save(entry);
+        if (past) {
+            entry.setOccurredAt(day.atTime(12, 0).atZone(ZONE).toInstant());
+        }
+        MortSaleEntry saved = saleRepository.save(entry);
+        if (past) {
+            carryDelta(request.category(), -request.qty());
+        }
+        return saved;
     }
 
     @Audited(module = Mod.MORTALITY, action = "Edit Sale", type = LogType.AUDIT, detail = "'Transaction #' + #id")
@@ -276,6 +339,7 @@ public class MortalityService {
         if (!isEditableInstant(entry.getOccurredAt())) {
             throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
         }
+        int oldQty = entry.getQty();
         entry.setCustomer(request.customer());
         entry.setState(request.state());
         entry.setQty(request.qty());
@@ -283,7 +347,11 @@ public class MortalityService {
         entry.setCredit(request.credit());
         entry.setAdvance(request.advance());
         entry.setUpdatedBy(username);
-        return saleRepository.save(entry);
+        MortSaleEntry saved = saleRepository.save(entry);
+        if (saved.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now())) {
+            carryDelta(saved.getCategory(), oldQty - request.qty());
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -343,6 +411,20 @@ public class MortalityService {
 
     // ── Catfish & Disposal ────────────────────────────────────────────────
 
+    /** Catfish/disposal row for any day; a past day is created only when the caller may edit it. */
+    @Transactional
+    public MortCatfishDisposalState catfishDisposalFor(LocalDate date) {
+        if (date == null || date.isEqual(LocalDate.now())) {
+            return todayCatfishDisposal();
+        }
+        if (isEditable(date)) {
+            return catfishDisposalRepository.findByEntryDate(date)
+                    .orElseGet(() -> catfishDisposalRepository.save(MortCatfishDisposalState.builder().entryDate(date).build()));
+        }
+        return catfishDisposalRepository.findByEntryDate(date)
+                .orElseGet(() -> MortCatfishDisposalState.builder().entryDate(date).build());
+    }
+
     @Transactional
     public MortCatfishDisposalState todayCatfishDisposal() {
         LocalDate today = LocalDate.now();
@@ -368,16 +450,20 @@ public class MortalityService {
     @Audited(module = Mod.MORTALITY, action = "Save Catfish & Disposal", detail = "'Catfish: ' + #request.catfishQty() + ', Disposal: ' + #request.disposalQty()")
     @Transactional
     public MortCatfishDisposalState updateCatfishDisposal(UpdateCatfishDisposalRequest request, String username) {
-        MortCatfishDisposalState state = todayCatfishDisposal();
+        LocalDate day = resolveEntryDay(request.date());
+        MortCatfishDisposalState state = catfishDisposalFor(day);
         if (!isEditable(state.getEntryDate())) {
             throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
         }
+        boolean past = day.isBefore(LocalDate.now());
+        int catfishBefore = state.getCatfishQty();
+        int disposalBefore = state.getDisposalQty();
         int greenAvailable = categoryValue(MortCat.GREEN).getOpening() + producedToday(MortCat.GREEN);
         int pmRejectAvailable = categoryValue(MortCat.PM_REJECT).getOpening() + producedToday(MortCat.PM_REJECT);
-        if (request.catfishQty() > greenAvailable) {
+        if (!past && request.catfishQty() > greenAvailable) {
             throw new BadRequestException("Catfish feed cannot exceed available Green stock (" + greenAvailable + ").");
         }
-        if (request.disposalQty() > pmRejectAvailable) {
+        if (!past && request.disposalQty() > pmRejectAvailable) {
             throw new BadRequestException("Disposal cannot exceed available PM/Reject stock (" + pmRejectAvailable + ").");
         }
         state.setCatfishQty(request.catfishQty());
@@ -387,7 +473,12 @@ public class MortalityService {
         } else {
             state.setUpdatedBy(username);
         }
-        return catfishDisposalRepository.save(state);
+        MortCatfishDisposalState saved = catfishDisposalRepository.save(state);
+        if (past) {
+            carryDelta(MortCat.GREEN, -(request.catfishQty() - catfishBefore));
+            carryDelta(MortCat.PM_REJECT, -(request.disposalQty() - disposalBefore));
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -412,7 +503,7 @@ public class MortalityService {
     }
 
     public boolean isEditableInstant(Instant occurredAt) {
-        return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.MORTALITY, occurredAt.atZone(ZONE).toLocalDate());
     }
 
     // ── Reports (BACKEND_PLAN.md §8) ────────────────────────────────────────

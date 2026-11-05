@@ -105,6 +105,9 @@ logging:
 # Before this ever leaves your machine, set real values for API_SHARED_KEY
 # and JWT_SECRET as environment variables instead of relying on defaults.
 app:
+  backfill:
+    # Keep false until daily snapshots + later-day recalculation exist (see EditWindowService).
+    enabled: ${BACKFILL_ENABLED:false}
   security:
     # Shared secret every request must send as the X-API-Key header, checked
     # before Spring Security even runs — keeps random clients off the API.
