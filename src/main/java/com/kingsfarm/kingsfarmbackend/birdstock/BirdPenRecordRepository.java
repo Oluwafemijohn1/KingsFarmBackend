@@ -14,6 +14,8 @@ public interface BirdPenRecordRepository extends JpaRepository<BirdPenRecord, Lo
     Page<BirdPenRecord> findAllByPenOrderByEntryDateDesc(Pen pen, Pageable pageable);
     Page<BirdPenRecord> findAllByOrderByEntryDateDesc(Pageable pageable);
 
+    List<BirdPenRecord> findAllByPenAndEntryDateGreaterThan(Pen pen, LocalDate entryDate);
+
     /** Most recent record strictly before the given date — how a new day's opening is carried forward. */
     Optional<BirdPenRecord> findFirstByPenAndEntryDateLessThanOrderByEntryDateDesc(Pen pen, LocalDate entryDate);
 

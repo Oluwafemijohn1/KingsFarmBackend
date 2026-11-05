@@ -9,6 +9,8 @@ import java.util.Optional;
 
 public interface ProductionDayStateRepository extends JpaRepository<ProductionDayState, Long> {
     Optional<ProductionDayState> findByEntryDate(LocalDate entryDate);
+
+    java.util.List<ProductionDayState> findAllByEntryDateGreaterThan(LocalDate entryDate);
     Optional<ProductionDayState> findFirstByEntryDateLessThanOrderByEntryDateDesc(LocalDate entryDate);
     Page<ProductionDayState> findAllByOrderByEntryDateDesc(Pageable pageable);
 }

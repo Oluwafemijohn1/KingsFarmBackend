@@ -58,6 +58,12 @@ public class FeedMillController {
         service.lockIngredientOpening(name);
     }
 
+    @PostMapping("/ingredients/{name}/restock")
+    @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
+    public void restockPastDay(@PathVariable String name, @Valid @RequestBody com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        service.restockPastDay(name, request);
+    }
+
     @PatchMapping("/ingredients/{name}/added")
     @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
     public void setIngredientAdded(@AuthenticationPrincipal AuthenticatedPrincipal principal,

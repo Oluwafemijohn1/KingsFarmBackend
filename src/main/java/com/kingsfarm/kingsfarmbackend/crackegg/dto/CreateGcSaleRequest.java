@@ -29,6 +29,8 @@ public record CreateGcSaleRequest(
         @Min(0) long cashAmount,
         @Min(0) long transferAmount,
         @Min(0) long credit,
-        @Min(0) long advance
+        @Min(0) long advance,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

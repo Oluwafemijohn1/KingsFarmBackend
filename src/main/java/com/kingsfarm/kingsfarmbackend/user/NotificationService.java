@@ -20,6 +20,12 @@ public class NotificationService {
         this.email = email;
     }
 
+    /** Sends a verify / reset link without making the requester wait on SMTP (and without timing differences revealing whether an account exists). */
+    @Async
+    public void accountSetup(User user, String rawToken, boolean passwordReset, int validHours) {
+        email.sendAccountSetup(user, rawToken, passwordReset, validHours);
+    }
+
     @Async
     public void openingStockRequested(List<String> adminEmails, String requesterName, String moduleLabel, String scopeLabel, String reason) {
         for (String to : adminEmails) {
@@ -40,6 +46,29 @@ public class NotificationService {
                 List.of("Your request to edit the Opening Stock for " + moduleLabel + " / " + scopeLabel + " was "
                         + (approved ? "approved" : "denied") + " by " + resolverName + "."
                         + (approved ? " You can now make the change." : "")),
+                approved ? "Open " + moduleLabel : "Open the app", email.appLink(approved ? modulePath : "/dashboard"), null);
+    }
+
+    @Async
+    public void backfillRequested(List<String> adminEmails, String requesterName, String moduleLabel, String forDate, String reason) {
+        for (String to : adminEmails) {
+            email.send(to, "Permission requested to enter " + moduleLabel + " records for " + forDate,
+                    "Back-dated entry requested", "Hello,",
+                    List.of(requesterName + " is asking for permission to enter or edit " + moduleLabel + " records for " + forDate + ", which is past the 24-hour grace period.",
+                            "Reason given: " + reason),
+                    "Review request", email.appLink("/admin/opening-stock"),
+                    "Sign in as an Administrator to approve or deny this request.");
+        }
+    }
+
+    @Async
+    public void backfillResolved(String to, String requesterName, String moduleLabel, String forDate, boolean approved, String resolverName, String modulePath) {
+        email.send(to, "Back-dated entry " + (approved ? "approved" : "denied") + ": " + moduleLabel + " " + forDate,
+                approved ? "Permission granted" : "Permission denied",
+                "Hello " + requesterName + ",",
+                List.of("Your request to enter or edit " + moduleLabel + " records for " + forDate + " was "
+                        + (approved ? "approved" : "denied") + " by " + resolverName + "."
+                        + (approved ? " You can now make the entry — the permission stays open for 24 hours." : "")),
                 approved ? "Open " + moduleLabel : "Open the app", email.appLink(approved ? modulePath : "/dashboard"), null);
     }
 

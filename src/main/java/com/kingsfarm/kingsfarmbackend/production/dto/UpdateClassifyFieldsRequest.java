@@ -13,6 +13,8 @@ import jakarta.validation.constraints.DecimalMin;
  */
 public record UpdateClassifyFieldsRequest(
         @DecimalMin("0") Double goodClassify,
-        @DecimalMin("0") Double roughClassify
+        @DecimalMin("0") Double roughClassify,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

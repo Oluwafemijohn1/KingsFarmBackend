@@ -97,6 +97,7 @@ public class DailyRolloverService {
         LocalDate prev = state.getLastDate();
         // Must happen first: it reads the finished day's Whole Egg / Crack Egg figures before they are reset below.
         productionService.getTodayDayState();
+        productionService.snapshotCrackUse(prev);
         tx.executeWithoutResult(status -> {
             wholeEggService.rollOver(prev);
             crackEggService.rollOver(prev);

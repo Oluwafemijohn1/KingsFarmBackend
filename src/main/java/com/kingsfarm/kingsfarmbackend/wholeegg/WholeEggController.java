@@ -118,6 +118,12 @@ public class WholeEggController {
 
     // ── Sales / Payments ──────────────────────────────────────────────────
 
+    @PostMapping("/past-adjustments")
+    @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
+    public void recordPastAdjustment(@Valid @RequestBody PastAdjustmentRequest request) {
+        service.recordPastAdjustment(request);
+    }
+
     @PostMapping("/sales")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
     @ResponseStatus(HttpStatus.CREATED)

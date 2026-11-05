@@ -17,6 +17,8 @@ public record CreateSaleRequest(
         @Min(0) long cashAmount,
         @Min(0) long transferAmount,
         /** Multi-bank transfers. When present (and Transfer is selected) this wins over {@code bank}/{@code transferAmount}: transferAmount is the sum of these. */
-        @jakarta.validation.Valid List<BankTransferRequest> transfers
+        @jakarta.validation.Valid List<BankTransferRequest> transfers,
+        /** Day of the sale; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

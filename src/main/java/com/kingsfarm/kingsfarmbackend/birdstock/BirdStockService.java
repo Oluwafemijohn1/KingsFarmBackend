@@ -39,6 +39,10 @@ import java.util.stream.Collectors;
 @Service
 public class BirdStockService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
+
     private final PenRepository penRepository;
     private final BirdPenRecordRepository recordRepository;
     private final OpeningStockLockService lockService;
@@ -100,6 +104,22 @@ public class BirdStockService {
                 .toList();
     }
 
+    /** Records for any day: past days only create missing rows when the caller may edit that day (so a missed day can be filled in). */
+    @Transactional
+    public List<BirdPenRecordResponse> getRecordsFor(LocalDate date) {
+        if (date == null || date.isEqual(LocalDate.now())) {
+            return getTodayRecords();
+        }
+        boolean canEdit = editWindow.isOpen(Mod.BIRD_STOCK, date);
+        return listPens(false).stream()
+                .map(pen -> canEdit
+                        ? java.util.Optional.of(findOrCreateTodayRecord(pen, date))
+                        : recordRepository.findByPenAndEntryDate(pen, date))
+                .flatMap(java.util.Optional::stream)
+                .map(this::toResponse)
+                .toList();
+    }
+
     /** Entity-level twin of getTodayRecords() — for internal callers (totalClosingToday()) that only need the numbers, not a lazy-pen-safe response DTO. */
     private List<BirdPenRecord> getOrCreateTodayRecordEntities() {
         LocalDate today = LocalDate.now();
@@ -129,11 +149,15 @@ public class BirdStockService {
     public BirdPenRecordResponse updateRecord(Long penId, UpdateBirdPenRecordRequest request, String username) {
         Pen pen = penRepository.findById(penId).orElseThrow(() -> new NotFoundException("Pen not found."));
         LocalDate today = LocalDate.now();
-        BirdPenRecord record = findOrCreateTodayRecord(pen, today);
-
-        if (!record.getEntryDate().isEqual(today)) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+        LocalDate day = request.date() == null ? today : request.date();
+        if (day.isAfter(today)) {
+            throw new ForbiddenException("You can't enter records for a future date.");
         }
+        if (!editWindow.isOpen(Mod.BIRD_STOCK, day)) {
+            throw new ForbiddenException("This day is locked. Ask the Administrator for permission to enter it.");
+        }
+        BirdPenRecord record = findOrCreateTodayRecord(pen, day);
+        int closingBefore = record.closing();
 
         if (request.opening() != null && request.opening() != record.getOpening()) {
             if (lockService.isLocked(Mod.BIRD_STOCK, pen.getName())) {
@@ -167,6 +191,16 @@ public class BirdStockService {
             record.setUpdatedBy(username);
         }
         BirdPenRecord saved = recordRepository.save(record);
+        if (day.isBefore(today)) {
+            // A finished day's closing changed, so every later day's opening for this pen moves by the same amount.
+            int delta = saved.closing() - closingBefore;
+            if (delta != 0) {
+                for (BirdPenRecord later : recordRepository.findAllByPenAndEntryDateGreaterThan(pen, day)) {
+                    later.setOpening(later.getOpening() + delta);
+                    recordRepository.save(later);
+                }
+            }
+        }
         return toResponse(saved);
     }
 
@@ -178,7 +212,7 @@ public class BirdStockService {
     }
 
     public boolean isEditable(BirdPenRecord record) {
-        return record.getEntryDate().isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.BIRD_STOCK, record.getEntryDate());
     }
 
     public boolean isOpeningLocked(Pen pen) {

@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotNull;
 /** double, not int/@Min — Category Stock Summary's Opening Stock can now be a fractional crate count, same as Production by Pen's entries that carry forward into it. */
 public record UpdateCatOpeningRequest(
         @NotNull CatKey category,
-        @DecimalMin("0") double value
+        @DecimalMin("0") double value,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

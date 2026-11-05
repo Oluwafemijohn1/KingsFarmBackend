@@ -5,6 +5,8 @@ import jakarta.validation.constraints.Positive;
 
 public record CreateProductionRequest(
         @NotNull Long feedTypeId,
-        @Positive double qtyTons
+        @Positive double qtyTons,
+        /** Day of the entry; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }

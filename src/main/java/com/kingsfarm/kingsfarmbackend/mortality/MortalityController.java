@@ -54,6 +54,11 @@ public class MortalityController {
         return service.getTodayPenEntries();
     }
 
+    @GetMapping("/pens")
+    public List<MortPenEntryResponse> getPenEntries(@RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        return service.getPenEntriesFor(date);
+    }
+
     @PatchMapping("/pens/{penId}")
     @PreAuthorize("hasRole('MORTALITY_MANAGER')")
     public MortPenEntryResponse updatePenEntry(@AuthenticationPrincipal AuthenticatedPrincipal principal,
@@ -119,6 +124,12 @@ public class MortalityController {
     @GetMapping("/catfish-disposal/today")
     public CatfishDisposalResponse todayCatfishDisposal() {
         MortCatfishDisposalState state = service.todayCatfishDisposal();
+        return CatfishDisposalResponse.from(state, service.greenAvailable(), service.pmRejectAvailable(), service.isEditable(state.getEntryDate()));
+    }
+
+    @GetMapping("/catfish-disposal")
+    public CatfishDisposalResponse catfishDisposalFor(@RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        MortCatfishDisposalState state = service.catfishDisposalFor(date);
         return CatfishDisposalResponse.from(state, service.greenAvailable(), service.pmRejectAvailable(), service.isEditable(state.getEntryDate()));
     }
 

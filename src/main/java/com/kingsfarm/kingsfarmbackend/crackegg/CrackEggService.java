@@ -41,6 +41,10 @@ import java.util.stream.Collectors;
 @Service
 public class CrackEggService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
+
     private static final ZoneId ZONE = ZoneId.systemDefault();
 
     private final CrackEggStateRepository stateRepository;
@@ -98,6 +102,45 @@ public class CrackEggService {
     @Transactional(readOnly = true)
     public double goodSalesQty(LocalDate day) {
         return saleRepository.sumQtyBetween(com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day));
+    }
+
+    /** Good Crack gifts, or Rough Crack sent to the feed mill, that belong to a finished day: added to that day, later days follow. */
+    @Audited(module = Mod.CRACK_EGG, action = "Record Past-day Crack Movement", type = LogType.AUDIT, detail = "#request.kind() + ' for ' + #request.date()")
+    @Transactional
+    public void recordPastAdjustment(com.kingsfarm.kingsfarmbackend.crackegg.dto.PastCrackAdjustmentRequest request) {
+        LocalDate day = resolveEntryDay(request.date());
+        if (day.isEqual(LocalDate.now())) {
+            throw new BadRequestException("For today, use the normal fields.");
+        }
+        if (request.qty() <= 0) {
+            throw new BadRequestException("Enter a quantity above zero.");
+        }
+        if (request.kind() == com.kingsfarm.kingsfarmbackend.crackegg.dto.PastCrackAdjustmentRequest.Kind.GOOD_GIFT) {
+            productionService.carryCrackDelta(day, -request.qty(), 0);
+        } else {
+            productionService.carryCrackDelta(day, 0, -request.qty());
+        }
+    }
+
+    /** System adjustment from a past-day edit: shifts the live Good/Rough openings (ignores the opening-stock lock). */
+    @Transactional
+    public void adjustOpenings(double goodDelta, double roughDelta) {
+        CrackEggState s = state();
+        s.setGcOpening(s.getGcOpening() + goodDelta);
+        s.setRcOpening(s.getRcOpening() + roughDelta);
+        stateRepository.save(s);
+    }
+
+    private LocalDate resolveEntryDay(LocalDate requested) {
+        LocalDate today = LocalDate.now();
+        LocalDate day = requested == null ? today : requested;
+        if (day.isAfter(today)) {
+            throw new BadRequestException("You can't enter records for a future date.");
+        }
+        if (!day.isEqual(today) && !editWindow.isOpen(Mod.CRACK_EGG, day)) {
+            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+        }
+        return day;
     }
 
     /** Daily rollover — finished-day Good/Rough closing becomes the new (locked) opening; gift/sales/feed-mill start at zero. */
@@ -232,6 +275,8 @@ public class CrackEggService {
     @Transactional
     public GcSaleTransaction createSale(CreateGcSaleRequest request, String username) {
         validatePaymentMethods(request.paymentMethods(), request.bank());
+        LocalDate day = resolveEntryDay(request.date());
+        boolean past = !day.isEqual(LocalDate.now());
 
         StockSummaryResponse summary = stockSummary();
         if (request.qty() > summary.gcClosing()) {
@@ -249,7 +294,14 @@ public class CrackEggService {
                 .credit(request.credit()).advance(request.advance())
                 .enteredBy(username)
                 .build();
-        return saleRepository.save(txn);
+        if (past) {
+            txn.setOccurredAt(day.atTime(12, 0).atZone(ZONE).toInstant());
+        }
+        GcSaleTransaction saved = saleRepository.save(txn);
+        if (past) {
+            productionService.carryCrackDelta(day, -request.qty(), 0);
+        }
+        return saved;
     }
 
     @Audited(module = Mod.CRACK_EGG, action = "Edit Sale", type = LogType.AUDIT, detail = "'Transaction #' + #id")
@@ -259,6 +311,7 @@ public class CrackEggService {
         if (!isEditable(txn.getOccurredAt())) {
             throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
         }
+        double oldQty = txn.getQty();
         txn.setCustomer(request.customer());
         txn.setState(request.state());
         txn.setQty(request.qty());
@@ -266,7 +319,12 @@ public class CrackEggService {
         txn.setCredit(request.credit());
         txn.setAdvance(request.advance());
         txn.setUpdatedBy(username);
-        return saleRepository.save(txn);
+        GcSaleTransaction saved = saleRepository.save(txn);
+        LocalDate savedDay = saved.getOccurredAt().atZone(ZONE).toLocalDate();
+        if (savedDay.isBefore(LocalDate.now())) {
+            productionService.carryCrackDelta(savedDay, oldQty - request.qty(), 0);
+        }
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -377,6 +435,6 @@ public class CrackEggService {
     }
 
     public boolean isEditable(Instant occurredAt) {
-        return occurredAt.atZone(ZONE).toLocalDate().isEqual(LocalDate.now());
+        return editWindow.isOpen(Mod.CRACK_EGG, occurredAt.atZone(ZONE).toLocalDate());
     }
 }

@@ -8,6 +8,8 @@ public record UpdateBirdPenRecordRequest(
         @Min(0) Integer mortality,
         @Min(0) Integer birdSales,
         @Min(0) Integer restocking,
-        String remarks
+        String remarks,
+        /** Day being edited; null means today. Past days must be inside the grace window or approved. */
+        java.time.LocalDate date
 ) {
 }
