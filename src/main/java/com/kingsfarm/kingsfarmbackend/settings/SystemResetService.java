@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * "Go live" reset: wipes every operational/test record so the farm starts
- * from zero, while keeping users (and their sessions/relief grants),
+ * from zero, while keeping users (unless deleteOtherUsers, which removes every non-Administrator),
  * Security Settings, Units, Pens, Feed Types, Fish Feed catalog entries,
  * Ingredient names/minimums and Formulations, and the System Logs (so the
  * reset itself, and who ran it, stays on record).
@@ -54,6 +54,10 @@ public class SystemResetService {
     private final com.kingsfarm.kingsfarmbackend.backfill.BackfillRequestRepository backfillRequests;
     private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
     private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
+    private final com.kingsfarm.kingsfarmbackend.user.UserRepository users;
+    private final com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens;
+    private final com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens;
+    private final com.kingsfarm.kingsfarmbackend.relief.ReliefGrantRepository reliefGrants;
 
     public SystemResetService(BirdPenRecordRepository birdPenRecords,
                               ProductionPenEntryRepository productionPenEntries,
@@ -80,7 +84,11 @@ public class SystemResetService {
                               OpeningStockStateRepository openingStates,
                               com.kingsfarm.kingsfarmbackend.backfill.BackfillRequestRepository backfillRequests,
                               com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures,
-                              @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover) {
+                              @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover,
+                              com.kingsfarm.kingsfarmbackend.user.UserRepository users,
+                              com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens,
+                              com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens,
+                              com.kingsfarm.kingsfarmbackend.relief.ReliefGrantRepository reliefGrants) {
         this.birdPenRecords = birdPenRecords;
         this.productionPenEntries = productionPenEntries;
         this.productionDayStates = productionDayStates;
@@ -107,11 +115,15 @@ public class SystemResetService {
         this.backfillRequests = backfillRequests;
         this.dayClosures = dayClosures;
         this.rollover = rollover;
+        this.users = users;
+        this.refreshTokens = refreshTokens;
+        this.accountTokens = accountTokens;
+        this.reliefGrants = reliefGrants;
     }
 
     @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'All operational records wiped (users and configuration kept) - system started for real use'")
     @Transactional
-    public void resetOperationalData() {
+    public void resetOperationalData(boolean deleteOtherUsers) {
         weLineItems.deleteAllInBatch();
         weTransactions.deleteAllInBatch();
         weCategoryValues.deleteAllInBatch();
@@ -150,5 +162,14 @@ public class SystemResetService {
         backfillRequests.deleteAllInBatch();
         dayClosures.wipe();
         rollover.afterReset(dayClosures.startDate());
+
+        if (deleteOtherUsers) {
+            // Every account except Administrators goes (their sessions, setup links and relief grants with them).
+            var admin = com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
+            reliefGrants.deleteAllInvolvingNon(admin);
+            refreshTokens.deleteAllByUserRoleNot(admin);
+            accountTokens.deleteAllByUserRoleNot(admin);
+            users.deleteAllByRoleNot(admin);
+        }
     }
 }
