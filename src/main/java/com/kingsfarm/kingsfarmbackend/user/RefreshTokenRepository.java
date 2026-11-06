@@ -13,6 +13,6 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     int revokeAllForUser(@org.springframework.data.repository.query.Param("user") User user, @org.springframework.data.repository.query.Param("now") java.time.Instant now);
 
     @org.springframework.data.jpa.repository.Modifying
-    @org.springframework.data.jpa.repository.Query("delete from RefreshToken r where r.user.role <> :role")
+    @org.springframework.data.jpa.repository.Query("delete from RefreshToken r where r.user in (select u from User u where u.role <> :role)")
     void deleteAllByUserRoleNot(@org.springframework.data.repository.query.Param("role") Role role);
 }
