@@ -450,9 +450,21 @@ public class ProductionService {
         java.util.Map<CatKey, Double> production = catProdTotals(date);
 
         List<CategoryStockRow> rows = new java.util.ArrayList<>();
+        boolean pastDay = date.isBefore(LocalDate.now());
+        // A finished day's closing is, by construction, the next day's opening — so a past day can be shown
+        // exactly (opening, production and sales are all kept per day) with crack use and gifts combined
+        // as whatever is left between them.
+        ProductionDayState next = pastDay ? dayStateRepository.findFirstByEntryDateGreaterThanOrderByEntryDateAsc(date).orElse(null) : null;
         for (CatKey k : CatKey.values()) {
             double opening = state.catOpening(k);
             double prod = production.get(k);
+            if (pastDay && next != null) {
+                double sales = wholeEggTotalSales(k, date);
+                double closing = next.catOpening(k);
+                double crackAndGift = opening + prod - sales - closing;
+                rows.add(new CategoryStockRow(k, opening, prod, Math.max(crackAndGift, 0), sales, 0, closing, lockService.isLocked(Mod.PRODUCTION, k.wire())));
+                continue;
+            }
             double crackUse = wholeEggCrackUse(k);
             double sales = wholeEggTotalSales(k);
             double gift = wholeEggGift(k);
