@@ -576,7 +576,10 @@ public class ProductionService {
             new ReportColumn("pct", "Prod %", true),
             new ReportColumn("xL", "XL", true),
             new ReportColumn("lg", "Large", true),
-            new ReportColumn("md", "Medium", true)
+            new ReportColumn("md", "Medium", true),
+            new ReportColumn("sm", "Small", true),
+            new ReportColumn("pl", "Pullet", true),
+            new ReportColumn("wh", "White", true)
     );
 
     /** Every pen's real closing stock in a range, summed per day — one query for the whole range rather than one per day/month (see reportRow callers below). */
@@ -617,6 +620,9 @@ public class ProductionService {
         double xl = entries.stream().mapToDouble(ProductionPenEntry::getQtyXl).sum();
         double lg = entries.stream().mapToDouble(ProductionPenEntry::getQtyLg).sum();
         double md = entries.stream().mapToDouble(ProductionPenEntry::getQtyMd).sum();
+        double sm = entries.stream().mapToDouble(ProductionPenEntry::getQtySm).sum();
+        double pl = entries.stream().mapToDouble(ProductionPenEntry::getQtyPl).sum();
+        double wh = entries.stream().mapToDouble(ProductionPenEntry::getQtyWh).sum();
         double crates = entries.stream().mapToDouble(ProductionPenEntry::total).sum();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("period", periodLabel);
@@ -625,6 +631,9 @@ public class ProductionService {
         row.put("xL", xl);
         row.put("lg", lg);
         row.put("md", md);
+        row.put("sm", sm);
+        row.put("pl", pl);
+        row.put("wh", wh);
         return row;
     }
 }
