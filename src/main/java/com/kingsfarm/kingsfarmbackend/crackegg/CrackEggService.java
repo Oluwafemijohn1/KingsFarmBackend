@@ -138,7 +138,7 @@ public class CrackEggService {
             throw new BadRequestException("You can't enter records for a future date.");
         }
         if (!day.isEqual(today) && !editWindow.isOpen(Mod.CRACK_EGG, day)) {
-            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         return day;
     }
@@ -309,7 +309,7 @@ public class CrackEggService {
     public GcSaleTransaction updateSale(Long id, UpdateGcSaleRequest request, String username) {
         GcSaleTransaction txn = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
         if (!isEditable(txn.getOccurredAt())) {
-            throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         double oldQty = txn.getQty();
         txn.setCustomer(request.customer());
@@ -351,7 +351,7 @@ public class CrackEggService {
     public CrackEggGiftLogEntry updateGiftEntry(Long id, UpdateGiftLogEntryRequest request, String username) {
         CrackEggGiftLogEntry entry = giftLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Gift log entry not found."));
         if (!isEditable(entry.getOccurredAt())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         entry.setQty(request.qty());
         entry.setRecipient(request.recipient());

@@ -85,6 +85,16 @@ public class DailyRolloverService {
         }
     }
 
+    /** After "Reset & Go Live": starts the day counter fresh and lays down a Production row for every day from the start date to today. */
+    public void afterReset(LocalDate startDate) {
+        synchronized (this) {
+            stateRepository.deleteAll();
+            stateRepository.save(new DailyRolloverState(LocalDate.now()));
+            productionService.ensureDayRows(startDate, LocalDate.now());
+            checkedDate = LocalDate.now();
+        }
+    }
+
     private void run(LocalDate today) {
         DailyRolloverState state = stateRepository.findById(DailyRolloverState.SINGLETON_ID).orElse(null);
         if (state == null) {

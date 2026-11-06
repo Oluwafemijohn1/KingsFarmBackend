@@ -32,13 +32,15 @@ public class BackfillRequestService {
     private final BackfillRequestRepository repository;
     private final UserRepository userRepository;
     private final EditWindowService editWindow;
+    private final DayClosureService dayClosures;
     private final NotificationService notifications;
 
     public BackfillRequestService(BackfillRequestRepository repository, UserRepository userRepository,
-                                  EditWindowService editWindow, NotificationService notifications) {
+                                  EditWindowService editWindow, DayClosureService dayClosures, NotificationService notifications) {
         this.repository = repository;
         this.userRepository = userRepository;
         this.editWindow = editWindow;
+        this.dayClosures = dayClosures;
         this.notifications = notifications;
     }
 
@@ -55,6 +57,11 @@ public class BackfillRequestService {
         }
         if (editWindow.isGraceOpen(request.forDate())) {
             throw new BadRequestException("That day is still within the 24-hour grace period — no permission is needed.");
+        }
+        if (!dayClosures.isClosed(request.module(), request.forDate())) {
+            LocalDate next = dayClosures.firstUnclosed(request.module());
+            throw new BadRequestException("That day hasn't been closed yet, so no permission is needed — just enter days in order"
+                    + (next != null ? " starting from " + next + "." : "."));
         }
         if (repository.existsByModuleAndForDateAndRequestedBy_IdAndStatus(request.module(), request.forDate(), userId, RequestStatus.PENDING)) {
             throw new BadRequestException("You already have a pending request for that day.");

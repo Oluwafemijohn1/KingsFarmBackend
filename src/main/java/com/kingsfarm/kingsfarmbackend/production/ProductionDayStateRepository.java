@@ -11,6 +11,8 @@ public interface ProductionDayStateRepository extends JpaRepository<ProductionDa
     Optional<ProductionDayState> findByEntryDate(LocalDate entryDate);
 
     java.util.List<ProductionDayState> findAllByEntryDateGreaterThan(LocalDate entryDate);
+
+    Optional<ProductionDayState> findFirstByEntryDateGreaterThanOrderByEntryDateAsc(LocalDate entryDate);
     Optional<ProductionDayState> findFirstByEntryDateLessThanOrderByEntryDateDesc(LocalDate entryDate);
     Page<ProductionDayState> findAllByOrderByEntryDateDesc(Pageable pageable);
 }

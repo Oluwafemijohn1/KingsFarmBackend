@@ -154,7 +154,7 @@ public class BirdStockService {
             throw new ForbiddenException("You can't enter records for a future date.");
         }
         if (!editWindow.isOpen(Mod.BIRD_STOCK, day)) {
-            throw new ForbiddenException("This day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         BirdPenRecord record = findOrCreateTodayRecord(pen, day);
         int closingBefore = record.closing();
