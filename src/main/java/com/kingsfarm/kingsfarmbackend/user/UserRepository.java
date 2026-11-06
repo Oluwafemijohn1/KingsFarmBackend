@@ -16,4 +16,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** Eligible pool for Relief Access — matches the frontend's eligibleUsers filter (non-Administrator, active accounts only). */
     List<User> findAllByRoleNotAndActiveTrueOrderByFullNameAsc(Role role);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from User u where u.role <> :role")
+    void deleteAllByRoleNot(@org.springframework.data.repository.query.Param("role") Role role);
 }

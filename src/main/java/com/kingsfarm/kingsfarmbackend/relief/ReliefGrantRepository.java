@@ -14,4 +14,8 @@ public interface ReliefGrantRepository extends JpaRepository<ReliefGrant, Long> 
     Optional<ReliefGrant> findByOnLeaveUserAndActiveTrue(User onLeaveUser);
     List<ReliefGrant> findAllByGranteeUserAndActiveTrue(User granteeUser);
     List<ReliefGrant> findAllByOnLeaveUserAndActiveTrue(User onLeaveUser);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from ReliefGrant g where g.onLeaveUser.role <> :role or g.granteeUser.role <> :role")
+    void deleteAllInvolvingNon(@org.springframework.data.repository.query.Param("role") com.kingsfarm.kingsfarmbackend.user.Role role);
 }
