@@ -28,10 +28,10 @@ public class SystemResetController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("message", "Type RESET to confirm."));
         }
-        service.resetOperationalData(Boolean.TRUE.equals(request.deleteOtherUsers()), Boolean.TRUE.equals(request.deletePens()));
+        service.resetOperationalData(Boolean.TRUE.equals(request.deleteOtherUsers()), Boolean.TRUE.equals(request.deletePens()), Boolean.TRUE.equals(request.deleteFeedSetup()));
         return ResponseEntity.ok(Map.of("message", "All records cleared. The system is ready for real use."));
     }
 
-    public record ResetRequest(@NotBlank String confirmation, Boolean deleteOtherUsers, Boolean deletePens) {
+    public record ResetRequest(@NotBlank String confirmation, Boolean deleteOtherUsers, Boolean deletePens, Boolean deleteFeedSetup) {
     }
 }
