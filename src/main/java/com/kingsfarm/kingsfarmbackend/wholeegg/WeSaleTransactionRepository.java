@@ -28,6 +28,20 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
     Optional<WeSaleTransaction> findFirstByCustomerAndOccurredAtLessThanOrderByOccurredAtDesc(Customer customer, Instant occurredAt);
 
     Page<WeSaleTransaction> findAllByOrderByOccurredAtDesc(Pageable pageable);
+
+    /**
+     * Sales Transactions list with optional filters: bank ("" = any bank, otherwise only transactions
+     * that sent money to that bank) and an instant range. minYear 0 means no year restriction.
+     */
+    @Query("select t from WeSaleTransaction t where t.txnYear >= :minYear " +
+            "and t.occurredAt >= :start and t.occurredAt < :end " +
+            "and (:bank = '' or exists (select 1 from t.transfers tr where tr.bank = :bank)) " +
+            "order by t.occurredAt desc")
+    Page<WeSaleTransaction> findFiltered(@Param("minYear") int minYear,
+                                         @Param("bank") String bank,
+                                         @Param("start") Instant start,
+                                         @Param("end") Instant end,
+                                         Pageable pageable);
     Page<WeSaleTransaction> findAllByCustomerOrderByOccurredAtDesc(Customer customer, Pageable pageable);
     Page<WeSaleTransaction> findAllByCustomerAndTxnYearOrderByOccurredAtDesc(Customer customer, int txnYear, Pageable pageable);
     Page<WeSaleTransaction> findAllByTxnYearOrderByOccurredAtDesc(int txnYear, Pageable pageable);

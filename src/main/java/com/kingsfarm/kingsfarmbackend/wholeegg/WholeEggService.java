@@ -686,11 +686,11 @@ public class WholeEggService {
     }
 
     @Transactional(readOnly = true)
-    public Page<WeSaleTransaction> allTransactions(boolean isAdmin, Pageable pageable) {
-        if (isAdmin) {
-            return transactionRepository.findAllByOrderByOccurredAtDesc(pageable);
-        }
-        return transactionRepository.findAllByTxnYearOrderByOccurredAtDesc(LocalDate.now().getYear(), pageable);
+    public Page<WeSaleTransaction> allTransactions(boolean isAdmin, String bank, LocalDate date, Pageable pageable) {
+        int minYear = isAdmin ? 0 : LocalDate.now().getYear();
+        Instant start = date == null ? Instant.EPOCH : com.kingsfarm.kingsfarmbackend.common.AppDay.start(date);
+        Instant end = date == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(date);
+        return transactionRepository.findFiltered(minYear, bank == null ? "" : bank.trim(), start, end, pageable);
     }
 
     // ── Payment Auditing (Administrator-only, Whole Egg only) ──────────────
