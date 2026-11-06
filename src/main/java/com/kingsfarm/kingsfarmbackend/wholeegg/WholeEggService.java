@@ -391,7 +391,7 @@ public class WholeEggService {
             throw new BadRequestException("You can't enter records for a future date.");
         }
         if (!day.isEqual(today) && !editWindow.isOpen(Mod.WHOLE_EGG, day)) {
-            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         return day;
     }
@@ -544,7 +544,7 @@ public class WholeEggService {
     public WeSaleTransaction updateTransaction(Long id, UpdateSaleTxnRequest request, String username) {
         WeSaleTransaction txn = transactionRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
         if (!isEditable(txn)) {
-            throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         Payment pay = resolvePayment(request.paymentMethods(), request.bank(), request.transfers(), request.cashAmount(), request.transferAmount());
 

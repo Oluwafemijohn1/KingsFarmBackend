@@ -222,7 +222,7 @@ public class MortalityService {
             throw new BadRequestException("You can't enter records for a future date.");
         }
         if (!day.isEqual(today) && !editWindow.isOpen(Mod.MORTALITY, day)) {
-            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         return day;
     }
@@ -273,7 +273,7 @@ public class MortalityService {
         LocalDate day = resolveEntryDay(request.date());
         MortPenEntry entry = findOrCreateTodayEntry(pen, day);
         if (!isEditable(entry.getEntryDate())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         int before = entry.get(request.category());
         entry.set(request.category(), request.qty());
@@ -337,7 +337,7 @@ public class MortalityService {
     public MortSaleEntry updateSale(Long id, UpdateMortSaleRequest request, String username) {
         MortSaleEntry entry = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
         if (!isEditableInstant(entry.getOccurredAt())) {
-            throw new ForbiddenException("This transaction was recorded on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         int oldQty = entry.getQty();
         entry.setCustomer(request.customer());
@@ -393,7 +393,7 @@ public class MortalityService {
     public MortGiftLogEntry updateGiftEntry(Long id, UpdateGiftLogEntryRequest request, String username) {
         MortGiftLogEntry entry = giftLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Gift log entry not found."));
         if (!isEditableInstant(entry.getOccurredAt())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         entry.setGood(request.good());
         entry.setDry(request.dry());
@@ -453,7 +453,7 @@ public class MortalityService {
         LocalDate day = resolveEntryDay(request.date());
         MortCatfishDisposalState state = catfishDisposalFor(day);
         if (!isEditable(state.getEntryDate())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         boolean past = day.isBefore(LocalDate.now());
         int catfishBefore = state.getCatfishQty();

@@ -429,7 +429,7 @@ public class FeedMillService {
             throw new BadRequestException("You can't enter records for a future date.");
         }
         if (!day.isEqual(today) && !editWindow.isOpen(Mod.FEED_MILL, day)) {
-            throw new ForbiddenException("That day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         return day;
     }
@@ -497,7 +497,7 @@ public class FeedMillService {
     public FeedProductionLogEntry updateProductionEntry(Long id, UpdateProductionRequest request, String username) {
         FeedProductionLogEntry entry = productionRepository.findById(id).orElseThrow(() -> new NotFoundException("Production run not found."));
         if (!isEditable(entry.getOccurredAt())) {
-            throw new ForbiddenException("This run was recorded on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         boolean pastEntry = entry.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now());
         FeedType oldType = entry.getFeedType();
@@ -768,7 +768,7 @@ public class FeedMillService {
     public FeedCollectionLogEntry updateCollectionEntry(Long id, UpdateCollectionRequest request, String username) {
         FeedCollectionLogEntry entry = collectionRepository.findById(id).orElseThrow(() -> new NotFoundException("Collection record not found."));
         if (!isEditable(entry.getOccurredAt())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         FishFeedStock starter = fishFeedStock("Fish Starter");
         FishFeedStock grower = fishFeedStock("Fish Grower");

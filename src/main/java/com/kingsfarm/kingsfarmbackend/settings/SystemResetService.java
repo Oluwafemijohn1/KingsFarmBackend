@@ -51,6 +51,9 @@ public class SystemResetService {
     private final FeedIngredientRepository ingredients;
     private final OpeningStockRequestRepository openingRequests;
     private final OpeningStockStateRepository openingStates;
+    private final com.kingsfarm.kingsfarmbackend.backfill.BackfillRequestRepository backfillRequests;
+    private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
+    private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
 
     public SystemResetService(BirdPenRecordRepository birdPenRecords,
                               ProductionPenEntryRepository productionPenEntries,
@@ -74,7 +77,10 @@ public class SystemResetService {
                               FishFeedStockRepository fishFeed,
                               FeedIngredientRepository ingredients,
                               OpeningStockRequestRepository openingRequests,
-                              OpeningStockStateRepository openingStates) {
+                              OpeningStockStateRepository openingStates,
+                              com.kingsfarm.kingsfarmbackend.backfill.BackfillRequestRepository backfillRequests,
+                              com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures,
+                              @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover) {
         this.birdPenRecords = birdPenRecords;
         this.productionPenEntries = productionPenEntries;
         this.productionDayStates = productionDayStates;
@@ -98,6 +104,9 @@ public class SystemResetService {
         this.ingredients = ingredients;
         this.openingRequests = openingRequests;
         this.openingStates = openingStates;
+        this.backfillRequests = backfillRequests;
+        this.dayClosures = dayClosures;
+        this.rollover = rollover;
     }
 
     @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'All operational records wiped (users and configuration kept) - system started for real use'")
@@ -136,5 +145,10 @@ public class SystemResetService {
 
         openingRequests.deleteAllInBatch();
         openingStates.deleteAllInBatch();
+
+        // Day-by-day bookkeeping starts over too: no closed days, no past-day permissions, fresh day counter.
+        backfillRequests.deleteAllInBatch();
+        dayClosures.wipe();
+        rollover.afterReset(dayClosures.startDate());
     }
 }

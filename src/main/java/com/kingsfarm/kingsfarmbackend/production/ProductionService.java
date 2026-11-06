@@ -68,6 +68,10 @@ public class ProductionService {
     @org.springframework.context.annotation.Lazy
     private com.kingsfarm.kingsfarmbackend.backfill.EditWindowService editWindow;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
+
     private final PenRepository penRepository;
     private final BirdPenRecordRepository birdPenRecordRepository;
     private final ProductionPenEntryRepository penEntryRepository;
@@ -150,7 +154,7 @@ public class ProductionService {
             throw new ForbiddenException("You can't enter records for a future date.");
         }
         if (!isEditable(day)) {
-            throw new ForbiddenException("This day is locked. Ask the Administrator for permission to enter it.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         ProductionPenEntry entry = findOrCreateTodayEntry(pen, day);
         double before = entry.get(request.category());
@@ -301,7 +305,7 @@ public class ProductionService {
     public ProductionDayState updateCatOpening(UpdateCatOpeningRequest request, String username) {
         ProductionDayState state = dayStateForEdit(request.date());
         if (!isEditable(state.getEntryDate())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         if (lockService.isLocked(Mod.PRODUCTION, request.category().wire())) {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
@@ -327,7 +331,7 @@ public class ProductionService {
     public ProductionDayState updateCrackFields(UpdateCrackFieldsRequest request, String username) {
         ProductionDayState state = dayStateForEdit(request.date());
         if (!isEditable(state.getEntryDate())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         double goodBefore = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify();
         double roughBefore = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
@@ -355,7 +359,7 @@ public class ProductionService {
     public ProductionDayState updateClassifyFields(UpdateClassifyFieldsRequest request, String username) {
         ProductionDayState state = dayStateForEdit(request.date());
         if (!isEditable(state.getEntryDate())) {
-            throw new ForbiddenException("This record was saved on a previous day and can no longer be edited.");
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         double goodBefore = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify();
         double roughBefore = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
@@ -367,6 +371,48 @@ public class ProductionService {
         return saved;
     }
 
+    /**
+     * Makes sure a Production day row exists for every day from {@code from} to {@code to}. Rows are what later days'
+     * openings are carried through, so a past day edited out of the blue (for instance right after a reset) must have
+     * all the days after it in place for the change to flow forward. Days created here carry the previous row's
+     * closing forward from the figures that are kept per day; crack use and gifts of those days were never recorded,
+     * so they count as zero.
+     */
+    @Transactional
+    public void ensureDayRows(LocalDate from, LocalDate to) {
+        LocalDate today = LocalDate.now();
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            if (dayStateRepository.findByEntryDate(d).isPresent()) {
+                continue;
+            }
+            if (d.isEqual(today)) {
+                getTodayDayState();
+                continue;
+            }
+            ProductionDayState prev = dayStateRepository.findFirstByEntryDateLessThanOrderByEntryDateDesc(d).orElse(null);
+            ProductionDayState.ProductionDayStateBuilder builder = ProductionDayState.builder().entryDate(d);
+            if (prev != null) {
+                LocalDate prevDate = prev.getEntryDate();
+                java.util.Map<CatKey, Double> prevProd = catProdTotals(prevDate);
+                for (CatKey k : CatKey.values()) {
+                    double closing = prev.catOpening(k) + prevProd.get(k) - wholeEggTotalSales(k, prevDate);
+                    builder = switch (k) {
+                        case X_LARGE -> builder.catOpeningXl(closing);
+                        case LARGE -> builder.catOpeningLg(closing);
+                        case MEDIUM -> builder.catOpeningMd(closing);
+                        case SMALL -> builder.catOpeningSm(closing);
+                        case PULLET -> builder.catOpeningPl(closing);
+                        case WHITE -> builder.catOpeningWh(closing);
+                    };
+                }
+                builder = builder
+                        .crackGoodOpen(prev.getCrackGoodOpen() + prev.getCrackGoodProd() + prev.getGoodClassify() - crackEggService.goodSalesQty(prevDate))
+                        .crackRoughOpen(prev.getCrackRoughOpen() + prev.getCrackRoughProd() + prev.getRoughClassify());
+            }
+            dayStateRepository.save(builder.build());
+        }
+    }
+
     /** Today's row (find-or-create) or, for a past day, the existing row — a missed day with no row at all can't be reconstructed. */
     @Transactional
     public ProductionDayState dayStateForEdit(LocalDate requested) {
@@ -376,6 +422,11 @@ public class ProductionService {
         }
         if (requested.isAfter(today)) {
             throw new ForbiddenException("You can't enter records for a future date.");
+        }
+        if (dayStateRepository.findByEntryDate(requested).isEmpty()) {
+            // A day nobody has touched yet: lay down every day from the start date to today so changes flow forward through them.
+            LocalDate start = dayClosures.startDate();
+            ensureDayRows(requested.isBefore(start) ? requested : start, today);
         }
         return dayStateRepository.findByEntryDate(requested)
                 .orElseThrow(() -> new NotFoundException("There is no Production record for that day."));
