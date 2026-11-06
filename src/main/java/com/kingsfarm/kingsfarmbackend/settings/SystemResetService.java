@@ -55,6 +55,8 @@ public class SystemResetService {
     private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
     private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
     private final com.kingsfarm.kingsfarmbackend.user.UserRepository users;
+    private final com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens;
+    private final com.kingsfarm.kingsfarmbackend.systemlog.SystemLogRepository systemLogs;
     private final com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens;
     private final com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens;
     private final com.kingsfarm.kingsfarmbackend.relief.ReliefGrantRepository reliefGrants;
@@ -86,6 +88,8 @@ public class SystemResetService {
                               com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures,
                               @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover,
                               com.kingsfarm.kingsfarmbackend.user.UserRepository users,
+                              com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens,
+                              com.kingsfarm.kingsfarmbackend.systemlog.SystemLogRepository systemLogs,
                               com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens,
                               com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens,
                               com.kingsfarm.kingsfarmbackend.relief.ReliefGrantRepository reliefGrants) {
@@ -116,6 +120,8 @@ public class SystemResetService {
         this.dayClosures = dayClosures;
         this.rollover = rollover;
         this.users = users;
+        this.pens = pens;
+        this.systemLogs = systemLogs;
         this.refreshTokens = refreshTokens;
         this.accountTokens = accountTokens;
         this.reliefGrants = reliefGrants;
@@ -123,7 +129,7 @@ public class SystemResetService {
 
     @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'All operational records wiped (users and configuration kept) - system started for real use'")
     @Transactional
-    public void resetOperationalData(boolean deleteOtherUsers) {
+    public void resetOperationalData(boolean deleteOtherUsers, boolean deletePens) {
         weLineItems.deleteAllInBatch();
         weTransactions.deleteAllInBatch();
         weCategoryValues.deleteAllInBatch();
@@ -162,6 +168,15 @@ public class SystemResetService {
         backfillRequests.deleteAllInBatch();
         dayClosures.wipe();
         rollover.afterReset(dayClosures.startDate());
+
+        // The dashboards' "Recent Activity" feeds read the Activity log, so start them empty too.
+        // Access and Audit logs stay as the permanent record.
+        systemLogs.deleteAllByLogType(com.kingsfarm.kingsfarmbackend.systemlog.LogType.ACTIVITY);
+
+        // Pens are shared by Bird Stock, Production and Mortality; every record using them is already gone above.
+        if (deletePens) {
+            pens.deleteAllInBatch();
+        }
 
         if (deleteOtherUsers) {
             // Every account except Administrators goes (their sessions, setup links and relief grants with them).

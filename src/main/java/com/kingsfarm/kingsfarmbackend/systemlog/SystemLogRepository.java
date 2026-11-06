@@ -12,4 +12,8 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, Long> {
 
     /** Module-scoped variant — backs a manager's own "My Recent Activity" dashboard panel (see DashboardService). */
     Page<SystemLog> findAllByLogTypeAndModuleInOrderByOccurredAtDesc(LogType logType, Collection<Mod> modules, Pageable pageable);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from SystemLog l where l.logType = :type")
+    void deleteAllByLogType(@org.springframework.data.repository.query.Param("type") LogType type);
 }
