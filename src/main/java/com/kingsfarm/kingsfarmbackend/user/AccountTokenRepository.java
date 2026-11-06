@@ -15,6 +15,6 @@ public interface AccountTokenRepository extends JpaRepository<AccountToken, Long
     void deleteAllForUser(User user);
 
     @Modifying
-    @Query("delete from AccountToken t where t.user.role <> :role")
+    @Query("delete from AccountToken t where t.user in (select u from User u where u.role <> :role)")
     void deleteAllByUserRoleNot(Role role);
 }

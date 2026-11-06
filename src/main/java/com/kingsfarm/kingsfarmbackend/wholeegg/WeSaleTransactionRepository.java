@@ -46,6 +46,17 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
     Page<WeSaleTransaction> findAllByCustomerAndTxnYearOrderByOccurredAtDesc(Customer customer, int txnYear, Pageable pageable);
     Page<WeSaleTransaction> findAllByTxnYearOrderByOccurredAtDesc(int txnYear, Pageable pageable);
 
+    /** Same list as findFiltered but only transactions that were (at least partly) paid by the given method (e.g. cash). */
+    @Query("select t from WeSaleTransaction t where t.txnYear >= :minYear " +
+            "and t.occurredAt >= :start and t.occurredAt < :end " +
+            "and :method member of t.paymentMethods " +
+            "order by t.occurredAt desc")
+    Page<WeSaleTransaction> findFilteredByMethod(@Param("minYear") int minYear,
+                                                 @Param("method") com.kingsfarm.kingsfarmbackend.common.PaymentMethod method,
+                                                 @Param("start") Instant start,
+                                                 @Param("end") Instant end,
+                                                 Pageable pageable);
+
     /** Year-filtered sibling of findFirstByCustomerOrderByOccurredAtDesc — a manager's "Last Purchase" in the Customers directory is restricted to this year, same as their Purchase History tab. */
     Optional<WeSaleTransaction> findFirstByCustomerAndTxnYearOrderByOccurredAtDesc(Customer customer, int txnYear);
 
