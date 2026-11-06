@@ -56,6 +56,8 @@ public class SystemResetService {
     private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
     private final com.kingsfarm.kingsfarmbackend.user.UserRepository users;
     private final com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens;
+    private final FeedFormulationEntryRepository formulationEntries;
+    private final FeedTypeRepository feedTypes;
     private final com.kingsfarm.kingsfarmbackend.systemlog.SystemLogRepository systemLogs;
     private final com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens;
     private final com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens;
@@ -89,6 +91,8 @@ public class SystemResetService {
                               @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover,
                               com.kingsfarm.kingsfarmbackend.user.UserRepository users,
                               com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens,
+                              FeedFormulationEntryRepository formulationEntries,
+                              FeedTypeRepository feedTypes,
                               com.kingsfarm.kingsfarmbackend.systemlog.SystemLogRepository systemLogs,
                               com.kingsfarm.kingsfarmbackend.user.RefreshTokenRepository refreshTokens,
                               com.kingsfarm.kingsfarmbackend.user.AccountTokenRepository accountTokens,
@@ -121,6 +125,8 @@ public class SystemResetService {
         this.rollover = rollover;
         this.users = users;
         this.pens = pens;
+        this.formulationEntries = formulationEntries;
+        this.feedTypes = feedTypes;
         this.systemLogs = systemLogs;
         this.refreshTokens = refreshTokens;
         this.accountTokens = accountTokens;
@@ -129,7 +135,7 @@ public class SystemResetService {
 
     @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'All operational records wiped (users and configuration kept) - system started for real use'")
     @Transactional
-    public void resetOperationalData(boolean deleteOtherUsers, boolean deletePens) {
+    public void resetOperationalData(boolean deleteOtherUsers, boolean deletePens, boolean deleteFeedSetup) {
         weLineItems.deleteAllInBatch();
         weTransactions.deleteAllInBatch();
         weCategoryValues.deleteAllInBatch();
@@ -154,12 +160,19 @@ public class SystemResetService {
         historyItems.deleteAllInBatch();
         historyGroups.deleteAllInBatch();
         fishFeed.deleteAllInBatch();
-        ingredients.findAll().forEach(i -> {
-            i.setOpening(0);
-            i.setAdded(0);
-            i.setUsed(0);
-            ingredients.save(i);
-        });
+        if (deleteFeedSetup) {
+            // Start Feed Mill from nothing: formulations, then feed types and ingredients (all their history is gone above).
+            formulationEntries.deleteAllInBatch();
+            feedTypes.deleteAllInBatch();
+            ingredients.deleteAllInBatch();
+        } else {
+            ingredients.findAll().forEach(i -> {
+                i.setOpening(0);
+                i.setAdded(0);
+                i.setUsed(0);
+                ingredients.save(i);
+            });
+        }
 
         openingRequests.deleteAllInBatch();
         openingStates.deleteAllInBatch();
