@@ -457,7 +457,7 @@ public class WholeEggService {
             throw new BadRequestException("For today, use the normal Commit button.");
         }
         double crackTotal = 0;
-        for (CategoryQtyEntry e : request.values()) {
+        for (PastQtyEntry e : request.values()) {
             // A negative quantity takes away something entered by mistake (e.g. a crack figure saved twice).
             if (e.qty() == 0) continue;
             productionService.carryDeltaForward(day, e.category(), -e.qty());
@@ -661,6 +661,28 @@ public class WholeEggService {
                 productionService.carryDeltaForward(day, e.getKey(), e.getValue());
             }
         }
+    }
+
+    /**
+     * Administrator-only (switched by TRANSACTION_DELETE_ENABLED): wipes the crack use and gifts recorded for a finished
+     * day, e.g. after the same figure was saved several times. Stock is put back and later days' openings rise by the same
+     * amounts; the day's Total Crack Use goes back to zero.
+     */
+    @Audited(module = Mod.WHOLE_EGG, action = "Clear Past-day Crack/Gift", type = LogType.AUDIT, detail = "'For ' + #day")
+    @Transactional
+    public void clearPastDayCrack(LocalDate day) {
+        if (!transactionDeleteEnabled) {
+            throw new ForbiddenException("Deleting transactions is switched off.");
+        }
+        if (!day.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Choose a day before today.");
+        }
+        for (com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow r : productionService.categoryRowsFor(day)) {
+            if (r.crackUse() > 0) {
+                productionService.carryDeltaForward(day, r.category(), r.crackUse());
+            }
+        }
+        productionService.clearCrackSnapshot(day);
     }
 
     /** Everything derived from the payment part of a request, already validated. */

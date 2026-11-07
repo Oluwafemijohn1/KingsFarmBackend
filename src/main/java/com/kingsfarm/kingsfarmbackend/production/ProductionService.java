@@ -516,6 +516,15 @@ public class ProductionService {
         dayStateRepository.save(row);
     }
 
+    /** Sets a finished day's recorded crack use back to zero. */
+    @Transactional
+    public void clearCrackSnapshot(LocalDate day) {
+        dayStateRepository.findByEntryDate(day).ifPresent(row -> {
+            row.setCrackFromWholeSnapshot(0.0);
+            dayStateRepository.save(row);
+        });
+    }
+
     /** Freezes Whole Egg's crack use for a finished day before the live figure resets (called by the nightly rollover). */
     @Transactional
     public void snapshotCrackUse(LocalDate day) {

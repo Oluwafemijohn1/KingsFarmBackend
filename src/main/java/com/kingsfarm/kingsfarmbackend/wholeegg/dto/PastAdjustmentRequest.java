@@ -15,7 +15,7 @@ import java.util.List;
 public record PastAdjustmentRequest(
         @NotNull LocalDate date,
         @NotNull Kind kind,
-        @NotEmpty @Valid List<CategoryQtyEntry> values
+        @NotEmpty @Valid List<PastQtyEntry> values
 ) {
     public enum Kind { CRACK, GIFT }
 }
