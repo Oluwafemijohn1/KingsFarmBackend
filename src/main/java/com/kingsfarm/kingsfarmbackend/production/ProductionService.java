@@ -344,6 +344,32 @@ public class ProductionService {
         }
     }
 
+    /**
+     * After crack use and gifts have been cleared, every later day's opening must be exactly the day before's
+     * opening + production - sales (no crack, no gift). Rebuilds that chain, then moves Whole Egg's live opening
+     * by whatever today's opening changed by, so the two stay in step. Used by the "Crack data" clean-up.
+     */
+    @Transactional
+    public void rebuildOpeningsWithoutCrack() {
+        List<ProductionDayState> rows = dayStateRepository.findAll().stream()
+                .sorted(java.util.Comparator.comparing(ProductionDayState::getEntryDate)).toList();
+        LocalDate today = LocalDate.now();
+        for (int i = 1; i < rows.size(); i++) {
+            ProductionDayState prev = rows.get(i - 1);
+            ProductionDayState cur = rows.get(i);
+            java.util.Map<CatKey, Double> prevProd = catProdTotals(prev.getEntryDate());
+            for (CatKey k : CatKey.values()) {
+                double oldOpening = cur.catOpening(k);
+                double newOpening = prev.catOpening(k) + prevProd.get(k) - wholeEggTotalSales(k, prev.getEntryDate());
+                cur.setCatOpening(k, newOpening);
+                if (cur.getEntryDate().isEqual(today) && Math.abs(newOpening - oldOpening) > 1e-9) {
+                    wholeEggService.adjustOpening(k, newOpening - oldOpening);
+                }
+            }
+            dayStateRepository.save(cur);
+        }
+    }
+
     @Transactional
     public void lockCatOpening(CatKey category) {
         lockService.lock(Mod.PRODUCTION, category.wire());
