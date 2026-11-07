@@ -146,7 +146,7 @@ public class WholeEggService {
             setCategoryValue(WeCategoryValueKind.OPENING, k, closing);
             setCategoryValue(WeCategoryValueKind.SALES_CRACK, k, 0);
             setCategoryValue(WeCategoryValueKind.GIFT, k, 0);
-            lockService.lock(Mod.WHOLE_EGG, k.wire());
+            if (!editWindow.isCatchingUp(Mod.WHOLE_EGG)) lockService.lock(Mod.WHOLE_EGG, k.wire());
         }
     }
 

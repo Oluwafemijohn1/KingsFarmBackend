@@ -159,7 +159,7 @@ public class MortalityService {
             value.setOpening(closing);
             value.setGiftQty(0);
             categoryValueRepository.save(value);
-            lockService.lock(Mod.MORTALITY, category.wire());
+            if (!editWindow.isCatchingUp(Mod.MORTALITY)) lockService.lock(Mod.MORTALITY, category.wire());
         }
     }
 

@@ -39,6 +39,18 @@ public class EditWindowService {
         return enabled;
     }
 
+    /**
+     * True while the module still has earlier days to enter. The nightly rollover must not lock the
+     * carried-forward openings then: the manager still has to type the real opening stock (e.g. for 1 Nov).
+     */
+    public boolean isCatchingUp(Mod module) {
+        if (!enabled) {
+            return false;
+        }
+        LocalDate first = closures.firstUnclosed(module);
+        return first != null && first.isBefore(LocalDate.now());
+    }
+
     /** Today or yesterday. */
     public boolean isGraceOpen(LocalDate day) {
         LocalDate today = LocalDate.now();
