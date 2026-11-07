@@ -321,6 +321,29 @@ public class ProductionService {
         return saved;
     }
 
+    /** Per-day category rows (opening, that day's own production, sales, closing) for a finished day — what Whole Egg shows for a past working day. */
+    @Transactional
+    public List<CategoryStockRow> categoryRowsFor(LocalDate day) {
+        return toResponse(dayStateForView(day)).categories();
+    }
+
+    /**
+     * Sets a finished day's opening for one size on behalf of another module (Whole Egg's stock screen).
+     * The caller has already checked its own module's day window and opening lock; this just writes the
+     * single per-day opening and carries the change into later days and the live opening.
+     */
+    @Transactional
+    public void setOpeningForDay(CatKey category, double value, LocalDate day, String username) {
+        ProductionDayState state = dayStateForEdit(day);
+        double before = state.catOpening(category);
+        state.setCatOpening(category, value);
+        stamp(state, username);
+        ProductionDayState saved = dayStateRepository.save(state);
+        if (saved.getEntryDate().isBefore(LocalDate.now())) {
+            carryDeltaForward(saved.getEntryDate(), category, value - before);
+        }
+    }
+
     @Transactional
     public void lockCatOpening(CatKey category) {
         lockService.lock(Mod.PRODUCTION, category.wire());

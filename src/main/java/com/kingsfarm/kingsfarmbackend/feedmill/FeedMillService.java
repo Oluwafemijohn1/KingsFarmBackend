@@ -662,14 +662,14 @@ public class FeedMillService {
             i.setAdded(0);
             i.setUsed(0);
             ingredientRepository.save(i);
-            lockService.lock(Mod.FEED_MILL, i.getName());
+            if (!editWindow.isCatchingUp(Mod.FEED_MILL)) lockService.lock(Mod.FEED_MILL, i.getName());
         }
         for (FishFeedStock f : fishFeedStockRepository.findAll()) {
             f.setOpening(f.closing());
             f.setAdded(0);
             f.setCollected(0);
             fishFeedStockRepository.save(f);
-            lockService.lock(Mod.FEED_MILL, f.getType());
+            if (!editWindow.isCatchingUp(Mod.FEED_MILL)) lockService.lock(Mod.FEED_MILL, f.getType());
         }
     }
 

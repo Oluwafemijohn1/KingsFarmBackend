@@ -161,8 +161,10 @@ public class CrackEggService {
         s.setGcGiftAuthorizer("");
         s.setRcFeedMill(0);
         stateRepository.save(s);
-        lockService.lock(Mod.CRACK_EGG, "good");
-        lockService.lock(Mod.CRACK_EGG, "rough");
+        if (!editWindow.isCatchingUp(Mod.CRACK_EGG)) {
+            lockService.lock(Mod.CRACK_EGG, "good");
+            lockService.lock(Mod.CRACK_EGG, "rough");
+        }
     }
 
     // ── Stock summary ────────────────────────────────────────────────────
