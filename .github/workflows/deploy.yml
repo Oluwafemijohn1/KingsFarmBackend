@@ -70,6 +70,7 @@ jobs:
             echo "MAIL_USERNAME=${{ secrets.MAIL_USERNAME }}"
             echo "MAIL_PASSWORD=${{ secrets.MAIL_PASSWORD }}"
             echo "BACKFILL_ENABLED=${{ vars.BACKFILL_ENABLED || 'false' }}"
+            echo "TRANSACTION_DELETE_ENABLED=${{ vars.TRANSACTION_DELETE_ENABLED || 'false' }}"
             echo "SERVER_ADDRESS=127.0.0.1"
             echo "SPRING_JPA_SHOW_SQL=false"
           } > backend.env
