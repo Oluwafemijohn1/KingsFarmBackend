@@ -415,6 +415,35 @@ public class MortalityService {
         return saved;
     }
 
+    @org.springframework.beans.factory.annotation.Value("${app.transactions.delete-enabled:false}")
+    private boolean saleDeleteEnabled;
+
+    public boolean isSaleDeleteEnabled() {
+        return saleDeleteEnabled;
+    }
+
+    /**
+     * Administrator-only removal of a mistaken sale (switched by TRANSACTION_DELETE_ENABLED). For today the
+     * stock simply recalculates; for an earlier day the birds go back into that day's closing, so every later
+     * day's opening is raised by the same amount.
+     */
+    @Audited(module = Mod.MORTALITY, action = "Delete Sale", type = LogType.AUDIT, detail = "'Transaction #' + #id")
+    @Transactional
+    public void deleteSale(Long id) {
+        if (!saleDeleteEnabled) {
+            throw new ForbiddenException("Deleting transactions is switched off.");
+        }
+        MortSaleEntry entry = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
+        LocalDate day = entry.getOccurredAt().atZone(ZONE).toLocalDate();
+        MortCat category = entry.getCategory();
+        int qty = entry.getQty();
+        saleRepository.delete(entry);
+        saleRepository.flush();
+        if (day.isBefore(LocalDate.now())) {
+            carryDelta(category, qty);
+        }
+    }
+
     @Transactional(readOnly = true)
     public Page<MortSaleEntry> saleHistory(Pageable pageable) {
         return saleRepository.findAllByOrderByOccurredAtDesc(pageable);

@@ -511,9 +511,7 @@ public class ProductionService {
         ProductionDayState row = dayStateRepository.findByEntryDate(day)
                 .orElseThrow(() -> new NotFoundException("There is no Production record for that day."));
         double next = (row.getCrackFromWholeSnapshot() == null ? 0 : row.getCrackFromWholeSnapshot()) + amount;
-        if (next < -1e-9) {
-            throw new BadRequestException("That would make the day's crack use negative.");
-        }
+        // Taking away more than was recorded just brings the day back to zero.
         row.setCrackFromWholeSnapshot(Math.max(next, 0));
         dayStateRepository.save(row);
     }

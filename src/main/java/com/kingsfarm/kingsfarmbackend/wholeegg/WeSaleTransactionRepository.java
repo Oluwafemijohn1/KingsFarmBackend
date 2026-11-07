@@ -33,10 +33,13 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
      * Sales Transactions list with optional filters: bank ("" = any bank, otherwise only transactions
      * that sent money to that bank) and an instant range. minYear 0 means no year restriction.
      */
-    @Query("select t from WeSaleTransaction t where t.txnYear >= :minYear " +
+    @Query(value = "select t from WeSaleTransaction t where t.txnYear >= :minYear " +
             "and t.occurredAt >= :start and t.occurredAt < :end " +
             "and (:bank = '' or exists (select 1 from t.transfers tr where tr.bank = :bank)) " +
-            "order by t.occurredAt desc")
+            "order by t.occurredAt desc",
+            countQuery = "select count(t) from WeSaleTransaction t where t.txnYear >= :minYear " +
+            "and t.occurredAt >= :start and t.occurredAt < :end " +
+            "and (:bank = '' or exists (select 1 from t.transfers tr where tr.bank = :bank))")
     Page<WeSaleTransaction> findFiltered(@Param("minYear") int minYear,
                                          @Param("bank") String bank,
                                          @Param("start") Instant start,
@@ -47,10 +50,13 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
     Page<WeSaleTransaction> findAllByTxnYearOrderByOccurredAtDesc(int txnYear, Pageable pageable);
 
     /** Same list as findFiltered but only transactions that were (at least partly) paid by the given method (e.g. cash). */
-    @Query("select t from WeSaleTransaction t where t.txnYear >= :minYear " +
+    @Query(value = "select t from WeSaleTransaction t where t.txnYear >= :minYear " +
             "and t.occurredAt >= :start and t.occurredAt < :end " +
             "and :method member of t.paymentMethods " +
-            "order by t.occurredAt desc")
+            "order by t.occurredAt desc",
+            countQuery = "select count(t) from WeSaleTransaction t where t.txnYear >= :minYear " +
+            "and t.occurredAt >= :start and t.occurredAt < :end " +
+            "and :method member of t.paymentMethods")
     Page<WeSaleTransaction> findFilteredByMethod(@Param("minYear") int minYear,
                                                  @Param("method") com.kingsfarm.kingsfarmbackend.common.PaymentMethod method,
                                                  @Param("start") Instant start,

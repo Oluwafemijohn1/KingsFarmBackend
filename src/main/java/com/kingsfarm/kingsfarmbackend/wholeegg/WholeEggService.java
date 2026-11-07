@@ -458,11 +458,12 @@ public class WholeEggService {
         }
         double crackTotal = 0;
         for (CategoryQtyEntry e : request.values()) {
-            if (e.qty() <= 0) continue;
+            // A negative quantity takes away something entered by mistake (e.g. a crack figure saved twice).
+            if (e.qty() == 0) continue;
             productionService.carryDeltaForward(day, e.category(), -e.qty());
             crackTotal += e.qty();
         }
-        if (request.kind() == PastAdjustmentRequest.Kind.CRACK && crackTotal > 0) {
+        if (request.kind() == PastAdjustmentRequest.Kind.CRACK && crackTotal != 0) {
             productionService.addCrackSnapshot(day, crackTotal);
         }
     }
