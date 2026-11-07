@@ -34,14 +34,15 @@ public class WholeEggController {
     // ── Stock Overview ───────────────────────────────────────────────────
 
     @GetMapping("/stock")
-    public List<StockRowResponse> stockRows() {
-        return service.stockRows();
+    public List<StockRowResponse> stockRows(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.stockRows(date);
     }
 
     @PatchMapping("/stock/opening")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
-    public void setOpening(@Valid @RequestBody UpdateCategoryValueRequest request) {
-        service.setOpening(request);
+    public void setOpening(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                           @Valid @RequestBody UpdateCategoryValueRequest request) {
+        service.setOpening(request, principal.username());
     }
 
     @PostMapping("/stock/opening/{category}/lock")

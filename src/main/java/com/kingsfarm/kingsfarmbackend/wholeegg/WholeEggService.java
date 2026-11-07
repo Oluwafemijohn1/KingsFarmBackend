@@ -152,9 +152,18 @@ public class WholeEggService {
 
     @Audited(module = Mod.WHOLE_EGG, action = "Update Opening Stock", detail = "#request.category() + ' -> ' + #request.value()")
     @Transactional
-    public void setOpening(UpdateCategoryValueRequest request) {
+    public void setOpening(UpdateCategoryValueRequest request, String username) {
         if (lockService.isLocked(Mod.WHOLE_EGG, request.category().wire())) {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
+        }
+        LocalDate day = request.date();
+        if (day != null && day.isBefore(LocalDate.now())) {
+            // The working day is a finished day: the opening lives in that day's Production row (one source of truth).
+            if (!editWindow.isOpen(Mod.WHOLE_EGG, day)) {
+                throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
+            }
+            productionService.setOpeningForDay(request.category(), request.value(), day, username);
+            return;
         }
         setCategoryValue(WeCategoryValueKind.OPENING, request.category(), request.value());
     }
@@ -220,6 +229,22 @@ public class WholeEggService {
             // PRICE is stored in the same double column but is always entered as a whole Naira amount — safe to narrow here.
             long p = price.get(k).longValue();
             rows.add(new StockRowResponse(k, op, prod, sold, crack, g, closing, p, lockService.isLocked(Mod.WHOLE_EGG, k.wire())));
+        }
+        return rows;
+    }
+
+    /** Stock table for the day being worked on: today = the live figures; a finished day = that day's own opening, production, sales and closing. */
+    @Transactional(readOnly = true)
+    public List<StockRowResponse> stockRows(LocalDate date) {
+        if (date == null || !date.isBefore(LocalDate.now())) {
+            return stockRows();
+        }
+        Map<CatKey, Double> price = categoryMap(WeCategoryValueKind.PRICE);
+        List<StockRowResponse> rows = new ArrayList<>();
+        for (com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow r : productionService.categoryRowsFor(date)) {
+            // Crack use and gifts for a finished day are only kept as a combined figure, shown under Crack Use.
+            rows.add(new StockRowResponse(r.category(), r.opening(), r.production(), r.totalSales(), r.crackUse(), 0,
+                    r.closing(), price.get(r.category()).longValue(), lockService.isLocked(Mod.WHOLE_EGG, r.category().wire())));
         }
         return rows;
     }
