@@ -133,66 +133,131 @@ public class SystemResetService {
         this.reliefGrants = reliefGrants;
     }
 
-    @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'All operational records wiped (users and configuration kept) - system started for real use'")
+    /** Group keys the Administrator can tick; see the Reset dialog in AdminView. */
+    public static final java.util.Set<String> ALL_RECORD_GROUPS = java.util.Set.of(
+            "crack", "wholeEgg", "production", "birdStock", "mortality", "feedMill", "locks", "closures", "activity");
+
+    @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'Selected records wiped: ' + #groups")
     @Transactional
-    public void resetOperationalData(boolean deleteOtherUsers, boolean deletePens, boolean deleteFeedSetup) {
-        weLineItems.deleteAllInBatch();
-        weTransactions.deleteAllInBatch();
-        weCategoryValues.deleteAllInBatch();
-        customers.deleteAllInBatch();
+    public void resetOperationalData(java.util.Set<String> groups) {
+        boolean wholeEgg = groups.contains("wholeEgg");
+        boolean production = groups.contains("production");
+        boolean birdStock = groups.contains("birdStock");
+        boolean mortality = groups.contains("mortality");
+        boolean feedMill = groups.contains("feedMill");
+        boolean locks = groups.contains("locks");
+        boolean closures = groups.contains("closures");
 
-        gcSales.deleteAllInBatch();
-        crackGiftLog.deleteAllInBatch();
-        crackState.deleteAllInBatch();
+        // Things other rows point at can only go when everything pointing at them goes too.
+        if (groups.contains("pens") && !(production && birdStock && mortality)) {
+            throw new com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException(
+                    "Pens can only be deleted together with Production, Bird Stock and Mortality records.");
+        }
+        if (groups.contains("feedSetup") && !feedMill) {
+            throw new com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException(
+                    "The Feed Mill setup can only be deleted together with the Feed Mill records.");
+        }
+        if (groups.contains("users") && !(locks && closures)) {
+            throw new com.kingsfarm.kingsfarmbackend.common.exception.BadRequestException(
+                    "Users can only be deleted together with the opening-stock requests and past-day permissions.");
+        }
 
-        mortPenEntries.deleteAllInBatch();
-        mortCategoryValues.deleteAllInBatch();
-        mortSales.deleteAllInBatch();
-        mortGifts.deleteAllInBatch();
-        mortCatfish.deleteAllInBatch();
-
-        productionPenEntries.deleteAllInBatch();
-        productionDayStates.deleteAllInBatch();
-        birdPenRecords.deleteAllInBatch();
-
-        feedCollections.deleteAllInBatch();
-        feedProductions.deleteAllInBatch();
-        historyItems.deleteAllInBatch();
-        historyGroups.deleteAllInBatch();
-        fishFeed.deleteAllInBatch();
-        if (deleteFeedSetup) {
-            // Start Feed Mill from nothing: formulations, then feed types and ingredients (all their history is gone above).
-            formulationEntries.deleteAllInBatch();
-            feedTypes.deleteAllInBatch();
-            ingredients.deleteAllInBatch();
-        } else {
-            ingredients.findAll().forEach(i -> {
-                i.setOpening(0);
-                i.setAdded(0);
-                i.setUsed(0);
-                ingredients.save(i);
+        if (groups.contains("crack")) {
+            // Crack use and gifts, the Crack Egg module's records, and the crack figures kept on each Production day.
+            weCategoryValues.findAll().forEach(v -> {
+                if (v.getKind() == WeCategoryValueKind.SALES_CRACK || v.getKind() == WeCategoryValueKind.GIFT) {
+                    v.setValue(0);
+                    weCategoryValues.save(v);
+                }
+            });
+            productionDayStates.findAll().forEach(d -> {
+                d.setCrackGoodOpen(0);
+                d.setCrackRoughOpen(0);
+                d.setCrackGoodProd(0);
+                d.setCrackRoughProd(0);
+                d.setGoodClassify(0);
+                d.setRoughClassify(0);
+                d.setCrackFromWholeSnapshot(null);
+                productionDayStates.save(d);
+            });
+            gcSales.deleteAllInBatch();
+            crackGiftLog.deleteAllInBatch();
+            crackState.findAll().forEach(c -> {
+                c.setGcOpening(0);
+                c.setRcOpening(0);
+                c.setGcGiftQty(0);
+                c.setGcGiftRecipient("");
+                c.setGcGiftAuthorizer("");
+                c.setRcFeedMill(0);
+                crackState.save(c);
             });
         }
 
-        openingRequests.deleteAllInBatch();
-        openingStates.deleteAllInBatch();
+        if (wholeEgg) {
+            weLineItems.deleteAllInBatch();
+            weTransactions.deleteAllInBatch();
+            weCategoryValues.deleteAllInBatch();
+            customers.deleteAllInBatch();
+        }
 
-        // Day-by-day bookkeeping starts over too: no closed days, no past-day permissions, fresh day counter.
-        backfillRequests.deleteAllInBatch();
-        dayClosures.wipe();
-        rollover.afterReset(dayClosures.startDate());
+        if (mortality) {
+            mortPenEntries.deleteAllInBatch();
+            mortCategoryValues.deleteAllInBatch();
+            mortSales.deleteAllInBatch();
+            mortGifts.deleteAllInBatch();
+            mortCatfish.deleteAllInBatch();
+        }
 
-        // The dashboards' "Recent Activity" feeds read the Activity log, so start them empty too.
-        // Access and Audit logs stay as the permanent record.
-        systemLogs.deleteAllByLogType(com.kingsfarm.kingsfarmbackend.systemlog.LogType.ACTIVITY);
+        if (production) {
+            productionPenEntries.deleteAllInBatch();
+            productionDayStates.deleteAllInBatch();
+        }
+        if (birdStock) {
+            birdPenRecords.deleteAllInBatch();
+        }
 
-        // Pens are shared by Bird Stock, Production and Mortality; every record using them is already gone above.
-        if (deletePens) {
+        if (feedMill) {
+            feedCollections.deleteAllInBatch();
+            feedProductions.deleteAllInBatch();
+            historyItems.deleteAllInBatch();
+            historyGroups.deleteAllInBatch();
+            fishFeed.deleteAllInBatch();
+            if (groups.contains("feedSetup")) {
+                formulationEntries.deleteAllInBatch();
+                feedTypes.deleteAllInBatch();
+                ingredients.deleteAllInBatch();
+            } else {
+                ingredients.findAll().forEach(i -> {
+                    i.setOpening(0);
+                    i.setAdded(0);
+                    i.setUsed(0);
+                    ingredients.save(i);
+                });
+            }
+        }
+
+        if (locks) {
+            openingRequests.deleteAllInBatch();
+            openingStates.deleteAllInBatch();
+        }
+
+        if (closures) {
+            // Day-by-day bookkeeping starts over: no closed days, no past-day permissions, fresh day counter.
+            backfillRequests.deleteAllInBatch();
+            dayClosures.wipe();
+            rollover.afterReset(dayClosures.startDate());
+        }
+
+        if (groups.contains("activity")) {
+            // The dashboards' "Recent Activity" feeds read the Activity log; Access and Audit logs stay.
+            systemLogs.deleteAllByLogType(com.kingsfarm.kingsfarmbackend.systemlog.LogType.ACTIVITY);
+        }
+
+        if (groups.contains("pens")) {
             pens.deleteAllInBatch();
         }
 
-        if (deleteOtherUsers) {
-            // Every account except Administrators goes (their sessions, setup links and relief grants with them).
+        if (groups.contains("users")) {
             var admin = com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR;
             reliefGrants.deleteAllInvolvingNon(admin);
             refreshTokens.deleteAllByUserRoleNot(admin);
