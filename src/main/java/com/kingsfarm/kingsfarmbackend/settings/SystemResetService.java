@@ -55,6 +55,7 @@ public class SystemResetService {
     private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
     private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
     private final com.kingsfarm.kingsfarmbackend.user.UserRepository users;
+    private final com.kingsfarm.kingsfarmbackend.production.ProductionService productionService;
     private final com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens;
     private final FeedFormulationEntryRepository formulationEntries;
     private final FeedTypeRepository feedTypes;
@@ -90,6 +91,7 @@ public class SystemResetService {
                               com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures,
                               @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover,
                               com.kingsfarm.kingsfarmbackend.user.UserRepository users,
+                              @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.production.ProductionService productionService,
                               com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens,
                               FeedFormulationEntryRepository formulationEntries,
                               FeedTypeRepository feedTypes,
@@ -124,6 +126,7 @@ public class SystemResetService {
         this.dayClosures = dayClosures;
         this.rollover = rollover;
         this.users = users;
+        this.productionService = productionService;
         this.pens = pens;
         this.formulationEntries = formulationEntries;
         this.feedTypes = feedTypes;
@@ -135,7 +138,7 @@ public class SystemResetService {
 
     /** Group keys the Administrator can tick; see the Reset dialog in AdminView. */
     public static final java.util.Set<String> ALL_RECORD_GROUPS = java.util.Set.of(
-            "crack", "wholeEgg", "production", "birdStock", "mortality", "feedMill", "locks", "closures", "activity");
+            "crack", "productionCrack", "wholeEgg", "production", "birdStock", "mortality", "feedMill", "locks", "closures", "activity");
 
     @Audited(module = Mod.ADMIN, action = "System Reset", detail = "'Selected records wiped: ' + #groups")
     @Transactional
@@ -251,6 +254,11 @@ public class SystemResetService {
         if (groups.contains("activity")) {
             // The dashboards' "Recent Activity" feeds read the Activity log; Access and Audit logs stay.
             systemLogs.deleteAllByLogType(com.kingsfarm.kingsfarmbackend.systemlog.LogType.ACTIVITY);
+        }
+
+        if (groups.contains("productionCrack") && !production) {
+            // Production days kept their openings from when crack figures existed; bring them back in line so Crack Use shows 0.
+            productionService.rebuildOpeningsWithoutCrack();
         }
 
         if (groups.contains("pens")) {
