@@ -93,6 +93,17 @@ public class MortalityController {
                 .map(e -> MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 
+    @GetMapping("/sales/delete-enabled")
+    public java.util.Map<String, Boolean> saleDeleteEnabled() {
+        return java.util.Map.of("enabled", service.isSaleDeleteEnabled());
+    }
+
+    @DeleteMapping("/sales/{id}")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public void deleteSale(@PathVariable Long id) {
+        service.deleteSale(id);
+    }
+
     // ── Gift ──────────────────────────────────────────────────────────────
 
     @PostMapping("/gift")
