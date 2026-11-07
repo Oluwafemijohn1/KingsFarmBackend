@@ -116,7 +116,23 @@ public class MortalityService {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
         }
         MortCategoryValue value = categoryValue(category);
-        value.setOpening(request.value());
+        LocalDate day = request.date();
+        if (day != null && day.isBefore(LocalDate.now())) {
+            if (!isEditable(day)) {
+                throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
+            }
+            // The live opening is today's; make it whatever gives the typed opening on that day.
+            int live = request.value();
+            for (LocalDate d = day; d.isBefore(LocalDate.now()); d = d.plusDays(1)) {
+                live += netOn(category, d);
+            }
+            if (live < 0) {
+                throw new BadRequestException("That opening would make a later day's stock negative.");
+            }
+            value.setOpening(live);
+        } else {
+            value.setOpening(request.value());
+        }
         categoryValueRepository.save(value);
     }
 
@@ -166,6 +182,51 @@ public class MortalityService {
     @Transactional(readOnly = true)
     public List<MortCategoryStockRow> stockOverview() {
         return List.of(MortCat.values()).stream().map(this::stockRow).toList();
+    }
+
+    /** What changed a category's stock on one finished day (gifts for past days are not tracked separately). */
+    private int netOn(MortCat category, LocalDate day) {
+        int produced = producedOn(category, day);
+        MortCatfishDisposalState cd = catfishDisposalRepository.findByEntryDate(day).orElse(null);
+        return switch (category) {
+            case GREEN -> produced - (cd == null ? 0 : cd.getCatfishQty());
+            case PM_REJECT -> produced - (cd == null ? 0 : cd.getDisposalQty());
+            default -> produced - saleRepository.sumQtyByCategoryBetween(category,
+                    com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day));
+        };
+    }
+
+    /** Opening of a finished day = today's live opening minus everything that changed stock from that day up to yesterday. */
+    private int openingOn(MortCat category, LocalDate day, int liveOpening) {
+        int opening = liveOpening;
+        for (LocalDate d = day; d.isBefore(LocalDate.now()); d = d.plusDays(1)) {
+            opening -= netOn(category, d);
+        }
+        return opening;
+    }
+
+    /** Stock overview for the day being worked on: today = live figures; a finished day = that day's own opening, produced, sales and closing. */
+    @Transactional(readOnly = true)
+    public List<MortCategoryStockRow> stockOverview(LocalDate date) {
+        if (date == null || !date.isBefore(LocalDate.now())) {
+            return stockOverview();
+        }
+        MortCatfishDisposalState cd = catfishDisposalRepository.findByEntryDate(date).orElse(null);
+        List<MortCategoryStockRow> rows = new java.util.ArrayList<>();
+        for (MortCat category : MortCat.values()) {
+            MortCategoryValue value = peekCategoryValue(category);
+            int opening = openingOn(category, date, value.getOpening());
+            int produced = producedOn(category, date);
+            int sales = category.saleable()
+                    ? saleRepository.sumQtyByCategoryBetween(category, com.kingsfarm.kingsfarmbackend.common.AppDay.start(date), com.kingsfarm.kingsfarmbackend.common.AppDay.end(date))
+                    : 0;
+            int catfish = category == MortCat.GREEN && cd != null ? cd.getCatfishQty() : 0;
+            int disposal = category == MortCat.PM_REJECT && cd != null ? cd.getDisposalQty() : 0;
+            int closing = opening + produced - sales - catfish - disposal;
+            rows.add(new MortCategoryStockRow(category, opening, lockService.isLocked(Mod.MORTALITY, category.wire()),
+                    produced, sales, 0, catfish, disposal, closing));
+        }
+        return rows;
     }
 
     private MortCategoryStockRow stockRow(MortCat category) {

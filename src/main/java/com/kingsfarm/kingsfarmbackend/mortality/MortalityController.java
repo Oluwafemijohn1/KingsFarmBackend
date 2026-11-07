@@ -31,8 +31,8 @@ public class MortalityController {
     // ── Stock overview ───────────────────────────────────────────────────
 
     @GetMapping("/stock")
-    public List<MortCategoryStockRow> stockOverview() {
-        return service.stockOverview();
+    public List<MortCategoryStockRow> stockOverview(@RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        return service.stockOverview(date);
     }
 
     @PatchMapping("/stock/{category}/opening")
