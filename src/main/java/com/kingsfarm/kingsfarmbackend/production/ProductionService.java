@@ -321,6 +321,23 @@ public class ProductionService {
         return saved;
     }
 
+    /** Same lookup as the day picker's view. */
+    @Transactional
+    public ProductionDayState updateClassifyResponseState(LocalDate date) {
+        return dayStateForView(date);
+    }
+
+    /** Day state as the Crack Egg Manager sees it: editable follows the Crack Egg module's day window. */
+    @Transactional(readOnly = true)
+    public ProductionDayStateResponse toResponseForCrackManager(ProductionDayState state) {
+        ProductionDayStateResponse r = toResponse(state);
+        return new ProductionDayStateResponse(r.entryDate(), r.categories(), r.crackGoodOpen(), r.crackRoughOpen(),
+                r.crackGoodProd(), r.crackRoughProd(), r.goodClassify(), r.roughClassify(), r.totalCrackFromWhole(),
+                r.classifyTotal(), r.classifyMismatch(), r.crackGoodGiftAuto(), r.crackGoodSalesAuto(),
+                r.crackGoodClosing(), r.crackRoughClosing(), r.enteredBy(), r.updatedBy(),
+                editWindow.isOpen(Mod.CRACK_EGG, r.entryDate()));
+    }
+
     /** Per-day category rows (opening, that day's own production, sales, closing) for a finished day — what Whole Egg shows for a past working day. */
     @Transactional
     public List<CategoryStockRow> categoryRowsFor(LocalDate day) {
@@ -407,7 +424,8 @@ public class ProductionService {
     @Transactional
     public ProductionDayState updateClassifyFields(UpdateClassifyFieldsRequest request, String username) {
         ProductionDayState state = dayStateForEdit(request.date());
-        if (!isEditable(state.getEntryDate())) {
+        // The Crack Egg Manager works through their own module's days, so the Crack Egg day window decides, not Production's.
+        if (!editWindow.isOpen(Mod.CRACK_EGG, state.getEntryDate())) {
             throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         double goodBefore = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify();

@@ -59,14 +59,21 @@ public class ProductionController {
     // updateClassifyFields below.
     @GetMapping("/day-state/today")
     @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
-    public ProductionDayStateResponse getTodayDayState() {
+    public ProductionDayStateResponse getTodayDayState(@AuthenticationPrincipal AuthenticatedPrincipal principal) {
+        if (principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.CRACK_EGG_MANAGER) {
+            return service.toResponseForCrackManager(service.getTodayDayState());
+        }
         return service.toResponse(service.getTodayDayState());
     }
 
     /** Day state for a chosen day (defaults to today) — the Crack Egg page's day picker. */
     @GetMapping("/day-state")
     @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'MANAGING_DIRECTOR', 'PRODUCTION_MANAGER', 'CRACK_EGG_MANAGER')")
-    public ProductionDayStateResponse getDayState(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    public ProductionDayStateResponse getDayState(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        if (principal.role() == com.kingsfarm.kingsfarmbackend.user.Role.CRACK_EGG_MANAGER) {
+            return service.toResponseForCrackManager(service.updateClassifyResponseState(date));
+        }
         return service.toResponse(service.dayStateForView(date));
     }
 
@@ -99,7 +106,7 @@ public class ProductionController {
     @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
     public ProductionDayStateResponse updateClassifyFields(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                              @Valid @RequestBody UpdateClassifyFieldsRequest request) {
-        return service.toResponse(service.updateClassifyFields(request, principal.username()));
+        return service.toResponseForCrackManager(service.updateClassifyFields(request, principal.username()));
     }
 
     @GetMapping("/day-state/history")
