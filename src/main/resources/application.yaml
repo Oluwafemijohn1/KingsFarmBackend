@@ -111,6 +111,9 @@ app:
   backfill:
     # Keep false until daily snapshots + later-day recalculation exist (see EditWindowService).
     enabled: ${BACKFILL_ENABLED:false}
+  transactions:
+    # When true, the Administrator sees a Delete button on Whole Egg transactions. Keep false normally.
+    delete-enabled: ${TRANSACTION_DELETE_ENABLED:false}
   security:
     # Shared secret every request must send as the X-API-Key header, checked
     # before Spring Security even runs — keeps random clients off the API.

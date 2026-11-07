@@ -621,6 +621,47 @@ public class WholeEggService {
         return txn;
     }
 
+    @org.springframework.beans.factory.annotation.Value("${app.transactions.delete-enabled:false}")
+    private boolean transactionDeleteEnabled;
+
+    public boolean isTransactionDeleteEnabled() {
+        return transactionDeleteEnabled;
+    }
+
+    /**
+     * Administrator-only removal of a mistaken sale or debt payment. A sale's deduction from stock is simply
+     * its line items, so removing them restores the stock; for an earlier day that restored stock is also pushed
+     * into every later day's opening (and the live opening), and the customer's running balances are re-walked.
+     */
+    @Audited(module = Mod.WHOLE_EGG, action = "Delete Transaction", type = LogType.AUDIT, detail = "'Transaction #' + #id")
+    @Transactional
+    public void deleteTransaction(Long id) {
+        if (!transactionDeleteEnabled) {
+            throw new ForbiddenException("Deleting transactions is switched off.");
+        }
+        WeSaleTransaction txn = transactionRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
+        if (txn.getType() == WeSaleTxnType.OPENING) {
+            throw new BadRequestException("An opening balance can't be deleted here.");
+        }
+        Customer customer = txn.getCustomer();
+        LocalDate day = txn.getOccurredAt().atZone(ZONE).toLocalDate();
+        java.util.Map<CatKey, Double> qty = new java.util.EnumMap<>(CatKey.class);
+        if (txn.getType() == WeSaleTxnType.SALE) {
+            for (WeSaleLineItem li : lineItemRepository.findAllByTransaction(txn)) {
+                qty.merge(li.getCategory(), li.getQty(), Double::sum);
+            }
+        }
+        lineItemRepository.deleteAllByTransaction(txn);
+        transactionRepository.delete(txn);
+        transactionRepository.flush();
+        recomputeLedger(customer);
+        if (day.isBefore(LocalDate.now())) {
+            for (java.util.Map.Entry<CatKey, Double> e : qty.entrySet()) {
+                productionService.carryDeltaForward(day, e.getKey(), e.getValue());
+            }
+        }
+    }
+
     /** Everything derived from the payment part of a request, already validated. */
     private record Payment(long cash, long transferTotal, List<BankTransfer> transfers, String bankLabel) {
     }

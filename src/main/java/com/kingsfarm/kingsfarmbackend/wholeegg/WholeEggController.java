@@ -175,6 +175,17 @@ public class WholeEggController {
         return PageResponse.from(service.transferTransactions(rangeStart, rangeEnd, pageable).map(service::toResponse));
     }
 
+    @GetMapping("/transactions/delete-enabled")
+    public java.util.Map<String, Boolean> transactionDeleteEnabled() {
+        return java.util.Map.of("enabled", service.isTransactionDeleteEnabled());
+    }
+
+    @DeleteMapping("/transactions/{id}")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public void deleteTransaction(@PathVariable Long id) {
+        service.deleteTransaction(id);
+    }
+
     @PatchMapping("/transactions/{id}/verification")
     @PreAuthorize("hasRole('ADMINISTRATOR')")
     public WeSaleTransactionResponse verifyTransaction(@AuthenticationPrincipal AuthenticatedPrincipal principal,
