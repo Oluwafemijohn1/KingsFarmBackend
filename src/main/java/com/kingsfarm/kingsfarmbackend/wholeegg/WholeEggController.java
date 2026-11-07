@@ -125,6 +125,12 @@ public class WholeEggController {
         service.recordPastAdjustment(request);
     }
 
+    @PostMapping("/past-adjustments/clear")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public void clearPastDayCrack(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        service.clearPastDayCrack(date);
+    }
+
     @PostMapping("/sales")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
     @ResponseStatus(HttpStatus.CREATED)
