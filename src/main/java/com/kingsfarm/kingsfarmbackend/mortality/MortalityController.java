@@ -134,8 +134,9 @@ public class MortalityController {
     }
 
     @GetMapping("/gift")
-    public PageResponse<GiftLogEntryResponse> giftLogHistory(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.giftLogHistory(pageable)
+    public PageResponse<GiftLogEntryResponse> giftLogHistory(@RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+                                                              @PageableDefault(size = 20) Pageable pageable) {
+        return PageResponse.from(service.giftLogHistory(date, pageable)
                 .map(e -> GiftLogEntryResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 

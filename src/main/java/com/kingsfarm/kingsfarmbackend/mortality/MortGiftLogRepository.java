@@ -10,6 +10,8 @@ import java.util.List;
 public interface MortGiftLogRepository extends JpaRepository<MortGiftLogEntry, Long> {
     Page<MortGiftLogEntry> findAllByOrderByOccurredAtDesc(Pageable pageable);
 
+    Page<MortGiftLogEntry> findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(Instant start, Instant end, Pageable pageable);
+
     /** Gifts recorded for a finished day inside a half-open instant range. */
     List<MortGiftLogEntry> findAllByForFinishedDayTrueAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(Instant start, Instant end);
 
