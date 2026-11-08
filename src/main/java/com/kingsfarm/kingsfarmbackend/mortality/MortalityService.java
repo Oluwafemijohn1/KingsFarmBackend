@@ -603,6 +603,15 @@ public class MortalityService {
     }
 
     @Transactional(readOnly = true)
+    public Page<MortGiftLogEntry> giftLogHistory(LocalDate date, Pageable pageable) {
+        if (date == null) {
+            return giftLogRepository.findAllByOrderByOccurredAtDesc(pageable);
+        }
+        return giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(
+                com.kingsfarm.kingsfarmbackend.common.AppDay.start(date), com.kingsfarm.kingsfarmbackend.common.AppDay.end(date), pageable);
+    }
+
+    @Transactional(readOnly = true)
     public Page<MortGiftLogEntry> giftLogHistory(Pageable pageable) {
         return giftLogRepository.findAllByOrderByOccurredAtDesc(pageable);
     }
