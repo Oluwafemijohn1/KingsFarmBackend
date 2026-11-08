@@ -55,6 +55,7 @@ public class SystemResetService {
     private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures;
     private final com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover;
     private final com.kingsfarm.kingsfarmbackend.user.UserRepository users;
+    private final com.kingsfarm.kingsfarmbackend.birdstock.BirdStockService birdStockService;
     private final com.kingsfarm.kingsfarmbackend.production.ProductionService productionService;
     private final com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens;
     private final FeedFormulationEntryRepository formulationEntries;
@@ -91,6 +92,7 @@ public class SystemResetService {
                               com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosures,
                               @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.rollover.DailyRolloverService rollover,
                               com.kingsfarm.kingsfarmbackend.user.UserRepository users,
+                              @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.birdstock.BirdStockService birdStockService,
                               @org.springframework.context.annotation.Lazy com.kingsfarm.kingsfarmbackend.production.ProductionService productionService,
                               com.kingsfarm.kingsfarmbackend.birdstock.PenRepository pens,
                               FeedFormulationEntryRepository formulationEntries,
@@ -126,6 +128,7 @@ public class SystemResetService {
         this.dayClosures = dayClosures;
         this.rollover = rollover;
         this.users = users;
+        this.birdStockService = birdStockService;
         this.productionService = productionService;
         this.pens = pens;
         this.formulationEntries = formulationEntries;
@@ -259,6 +262,10 @@ public class SystemResetService {
         if (groups.contains("productionCrack") && !production) {
             // Production days kept their openings from when crack figures existed; bring them back in line so Crack Use shows 0.
             productionService.rebuildOpeningsWithoutCrack();
+        }
+
+        if (groups.contains("birdOpenings") && !birdStock) {
+            birdStockService.rebuildOpenings();
         }
 
         if (groups.contains("pens")) {

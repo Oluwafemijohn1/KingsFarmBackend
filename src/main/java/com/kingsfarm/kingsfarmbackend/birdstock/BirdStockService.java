@@ -71,7 +71,9 @@ public class BirdStockService {
         // before Opening Stock locking kicks in for this pen (see class javadoc).
         BirdPenRecord record = BirdPenRecord.builder()
                 .pen(pen)
-                .entryDate(LocalDate.now())
+                // The pen's starting figure belongs to the day the module is entering (it carries forward from there),
+                // not to today — otherwise today's opening would be counted twice once the earlier days are entered.
+                .entryDate(editWindow.workingDay(Mod.BIRD_STOCK))
                 .opening(request.opening())
                 .enteredBy(username)
                 .build();
@@ -202,6 +204,34 @@ public class BirdStockService {
             }
         }
         return toResponse(saved);
+    }
+
+    /**
+     * Brings every pen's later records back in line with the carry-forward rule: from the first record that has a
+     * real (non-zero) opening onwards, each day's opening is the previous day's closing. Fixes openings that were
+     * counted twice (a pen's starting figure typed when the pen was added AND again on an earlier day).
+     */
+    @Transactional
+    public void rebuildOpenings() {
+        for (Pen pen : penRepository.findAll()) {
+            List<BirdPenRecord> records = recordRepository.findAllByPenOrderByEntryDateDesc(pen, org.springframework.data.domain.Pageable.unpaged()).getContent()
+                    .stream().sorted(java.util.Comparator.comparing(BirdPenRecord::getEntryDate)).toList();
+            int start = -1;
+            for (int i = 0; i < records.size(); i++) {
+                if (records.get(i).getOpening() != 0) {
+                    start = i;
+                    break;
+                }
+            }
+            if (start < 0) {
+                continue;
+            }
+            for (int i = start + 1; i < records.size(); i++) {
+                BirdPenRecord cur = records.get(i);
+                cur.setOpening(records.get(i - 1).closing());
+                recordRepository.save(cur);
+            }
+        }
     }
 
     /** The manager's self-service "Done — Lock" action once they've finished correcting an approved-unlocked Opening Stock field. */
