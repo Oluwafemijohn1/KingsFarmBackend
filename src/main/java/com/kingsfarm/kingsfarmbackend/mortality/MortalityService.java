@@ -463,6 +463,39 @@ public class MortalityService {
         }
     }
 
+    /**
+     * Administrator-only (switched by TRANSACTION_DELETE_ENABLED): moves a sale to the day it really belongs to.
+     * The birds are put back on the old day and taken off the new one, so every day in between recalculates.
+     */
+    @Audited(module = Mod.MORTALITY, action = "Move Sale To Another Day", type = LogType.AUDIT, detail = "'Transaction #' + #id + ' -> ' + #newDay")
+    @Transactional
+    public MortSaleEntry moveSaleDate(Long id, LocalDate newDay) {
+        if (!saleDeleteEnabled) {
+            throw new ForbiddenException("Changing transactions is switched off.");
+        }
+        if (newDay.isAfter(LocalDate.now())) {
+            throw new BadRequestException("You can't move a sale to a future day.");
+        }
+        MortSaleEntry entry = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
+        LocalDate oldDay = entry.getOccurredAt().atZone(ZONE).toLocalDate();
+        if (oldDay.equals(newDay)) {
+            return entry;
+        }
+        MortCat category = entry.getCategory();
+        int qty = entry.getQty();
+        if (oldDay.isBefore(LocalDate.now())) {
+            carryDelta(category, qty);
+        }
+        if (newDay.isBefore(LocalDate.now())) {
+            carryDelta(category, -qty);
+            entry.setOccurredAt(newDay.atTime(12, 0).atZone(ZONE).toInstant());
+        } else {
+            entry.setOccurredAt(Instant.now());
+        }
+        entry.setUpdatedBy("administrator");
+        return saleRepository.save(entry);
+    }
+
     /** Sales history filtered by payment ("Cash" or a bank name; blank = all) and/or one day. */
     @Transactional(readOnly = true)
     public Page<MortSaleEntry> saleHistory(String payment, LocalDate date, Pageable pageable) {
