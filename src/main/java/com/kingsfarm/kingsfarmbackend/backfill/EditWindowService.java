@@ -51,6 +51,15 @@ public class EditWindowService {
         return first != null && first.isBefore(LocalDate.now());
     }
 
+    /** The day a module is currently entering: its first unclosed day, or today when the day-by-day mode is off or caught up. */
+    public LocalDate workingDay(Mod module) {
+        if (!enabled) {
+            return LocalDate.now();
+        }
+        LocalDate first = closures.firstUnclosed(module);
+        return first == null ? LocalDate.now() : first;
+    }
+
     /** Today or yesterday. */
     public boolean isGraceOpen(LocalDate day) {
         LocalDate today = LocalDate.now();
