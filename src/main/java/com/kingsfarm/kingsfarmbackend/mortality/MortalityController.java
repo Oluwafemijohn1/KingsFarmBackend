@@ -95,6 +95,13 @@ public class MortalityController {
                 .map(e -> MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 
+    @PatchMapping("/sales/{id}/date")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public MortSaleResponse moveSaleDate(@PathVariable Long id, @Valid @RequestBody MoveSaleDateRequest request) {
+        MortSaleEntry entry = service.moveSaleDate(id, request.date());
+        return MortSaleResponse.from(entry, service.isEditableInstant(entry.getOccurredAt()));
+    }
+
     @GetMapping("/sales/delete-enabled")
     public java.util.Map<String, Boolean> saleDeleteEnabled() {
         return java.util.Map.of("enabled", service.isSaleDeleteEnabled());
