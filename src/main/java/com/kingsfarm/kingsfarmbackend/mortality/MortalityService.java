@@ -185,13 +185,31 @@ public class MortalityService {
     }
 
     /** What changed a category's stock on one finished day (gifts for past days are not tracked separately). */
+    /** Gifts recorded afterwards for a finished day (added to that day), per category. */
+    private int lateGiftOn(MortCat category, LocalDate day) {
+        if (!category.saleable()) {
+            return 0;
+        }
+        int total = 0;
+        for (MortGiftLogEntry g : giftLogRepository.findAllByForFinishedDayTrueAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(
+                com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day))) {
+            total += switch (category) {
+                case GOOD -> g.getGood();
+                case DRY -> g.getDry();
+                case RUNT -> g.getRunt();
+                default -> 0;
+            };
+        }
+        return total;
+    }
+
     private int netOn(MortCat category, LocalDate day) {
         int produced = producedOn(category, day);
         MortCatfishDisposalState cd = catfishDisposalRepository.findByEntryDate(day).orElse(null);
         return switch (category) {
             case GREEN -> produced - (cd == null ? 0 : cd.getCatfishQty());
             case PM_REJECT -> produced - (cd == null ? 0 : cd.getDisposalQty());
-            default -> produced - saleRepository.sumQtyByCategoryBetween(category,
+            default -> produced - lateGiftOn(category, day) - saleRepository.sumQtyByCategoryBetween(category,
                     com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day));
         };
     }
@@ -220,11 +238,12 @@ public class MortalityService {
             int sales = category.saleable()
                     ? saleRepository.sumQtyByCategoryBetween(category, com.kingsfarm.kingsfarmbackend.common.AppDay.start(date), com.kingsfarm.kingsfarmbackend.common.AppDay.end(date))
                     : 0;
+            int gift = lateGiftOn(category, date);
             int catfish = category == MortCat.GREEN && cd != null ? cd.getCatfishQty() : 0;
             int disposal = category == MortCat.PM_REJECT && cd != null ? cd.getDisposalQty() : 0;
-            int closing = opening + produced - sales - catfish - disposal;
+            int closing = opening + produced - sales - gift - catfish - disposal;
             rows.add(new MortCategoryStockRow(category, opening, lockService.isLocked(Mod.MORTALITY, category.wire()),
-                    produced, sales, 0, catfish, disposal, closing));
+                    produced, sales, gift, catfish, disposal, closing));
         }
         return rows;
     }
@@ -444,6 +463,18 @@ public class MortalityService {
         }
     }
 
+    /** Sales history filtered by payment ("Cash" or a bank name; blank = all) and/or one day. */
+    @Transactional(readOnly = true)
+    public Page<MortSaleEntry> saleHistory(String payment, LocalDate date, Pageable pageable) {
+        Instant start = date == null ? Instant.EPOCH : com.kingsfarm.kingsfarmbackend.common.AppDay.start(date);
+        Instant end = date == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(date);
+        String p = payment == null ? "" : payment.trim();
+        if (p.equalsIgnoreCase("cash")) {
+            return saleRepository.findFilteredByMethod(com.kingsfarm.kingsfarmbackend.common.PaymentMethod.CASH, start, end, pageable);
+        }
+        return saleRepository.findFiltered(p, start, end, pageable);
+    }
+
     @Transactional(readOnly = true)
     public Page<MortSaleEntry> saleHistory(Pageable pageable) {
         return saleRepository.findAllByOrderByOccurredAtDesc(pageable);
@@ -455,6 +486,13 @@ public class MortalityService {
     @Audited(module = Mod.MORTALITY, action = "Save Gift", type = LogType.AUDIT, detail = "'Recipient: ' + #request.recipient()")
     @Transactional
     public MortGiftLogEntry saveGift(SaveGiftRequest request, String username) {
+        LocalDate day = request.date();
+        if (day != null && day.isAfter(LocalDate.now())) {
+            throw new BadRequestException("You can't enter records for a future date.");
+        }
+        if (day != null && day.isBefore(LocalDate.now())) {
+            return saveGiftForFinishedDay(day, request, username);
+        }
         if (request.good() > closingFor(MortCat.GOOD)
                 || request.dry() > closingFor(MortCat.DRY)
                 || request.runt() > closingFor(MortCat.RUNT)) {
@@ -472,6 +510,37 @@ public class MortalityService {
         return giftLogRepository.save(entry);
     }
 
+    /** A gift for a finished day: added to that day (stock of every later day follows) and logged under that day's date. */
+    private MortGiftLogEntry saveGiftForFinishedDay(LocalDate day, SaveGiftRequest request, String username) {
+        if (!isEditable(day)) {
+            throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
+        }
+        java.util.Map<MortCat, Integer> wanted = new java.util.EnumMap<>(MortCat.class);
+        wanted.put(MortCat.GOOD, request.good());
+        wanted.put(MortCat.DRY, request.dry());
+        wanted.put(MortCat.RUNT, request.runt());
+        java.util.Map<MortCat, Integer> available = new java.util.EnumMap<>(MortCat.class);
+        for (MortCategoryStockRow r : stockOverview(day)) {
+            available.put(r.category(), r.closing());
+        }
+        for (java.util.Map.Entry<MortCat, Integer> e : wanted.entrySet()) {
+            if (e.getValue() > available.getOrDefault(e.getKey(), 0)) {
+                throw new BadRequestException("Gift quantity exceeds the stock available on that day.");
+            }
+        }
+        for (java.util.Map.Entry<MortCat, Integer> e : wanted.entrySet()) {
+            carryDelta(e.getKey(), -e.getValue());
+        }
+        MortGiftLogEntry entry = MortGiftLogEntry.builder()
+                .good(request.good()).dry(request.dry()).runt(request.runt())
+                .recipient(request.recipient()).authorizer(request.authorizer())
+                .enteredBy(username)
+                .occurredAt(day.atTime(12, 0).atZone(ZONE).toInstant())
+                .forFinishedDay(true)
+                .build();
+        return giftLogRepository.save(entry);
+    }
+
     private void setGiftQty(MortCat category, int qty) {
         MortCategoryValue value = categoryValue(category);
         value.setGiftQty(qty);
@@ -484,6 +553,12 @@ public class MortalityService {
         MortGiftLogEntry entry = giftLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Gift log entry not found."));
         if (!isEditableInstant(entry.getOccurredAt())) {
             throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
+        }
+        if (entry.isForFinishedDay()) {
+            // The gift belongs to a finished day: the difference flows into every later day's opening.
+            carryDelta(MortCat.GOOD, entry.getGood() - request.good());
+            carryDelta(MortCat.DRY, entry.getDry() - request.dry());
+            carryDelta(MortCat.RUNT, entry.getRunt() - request.runt());
         }
         entry.setGood(request.good());
         entry.setDry(request.dry());

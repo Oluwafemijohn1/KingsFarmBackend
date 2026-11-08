@@ -88,8 +88,10 @@ public class MortalityController {
     }
 
     @GetMapping("/sales")
-    public PageResponse<MortSaleResponse> saleHistory(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.saleHistory(pageable)
+    public PageResponse<MortSaleResponse> saleHistory(@RequestParam(required = false) String bank,
+                                                      @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+                                                      @PageableDefault(size = 20) Pageable pageable) {
+        return PageResponse.from(service.saleHistory(bank, date, pageable)
                 .map(e -> MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 

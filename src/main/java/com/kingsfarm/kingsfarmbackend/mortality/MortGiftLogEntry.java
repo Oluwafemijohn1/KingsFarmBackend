@@ -62,6 +62,11 @@ public class MortGiftLogEntry {
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
 
+    /** True for a gift recorded afterwards for a finished day (added to that day, not the live figure). */
+    @Column(name = "for_finished_day", nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean forFinishedDay = false;
+
     @PrePersist
     void onCreate() {
         if (occurredAt == null) {

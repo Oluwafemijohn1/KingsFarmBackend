@@ -9,6 +9,8 @@ public record SaveGiftRequest(
         @Min(0) int dry,
         @Min(0) int runt,
         @NotBlank String recipient,
-        @NotBlank String authorizer
+        @NotBlank String authorizer,
+        /** A finished day the gift belongs to; null = today. */
+        java.time.LocalDate date
 ) {
 }
