@@ -5,5 +5,6 @@ import jakarta.validation.constraints.NotNull;
 
 import java.time.LocalDate;
 
-public record CloseDayRequest(@NotNull Mod module, @NotNull LocalDate date) {
+/** {@code confirmNothingElse}: the manager confirms nothing more happened on a past day that still shows missing entries. */
+public record CloseDayRequest(@NotNull Mod module, @NotNull LocalDate date, Boolean confirmNothingElse) {
 }
