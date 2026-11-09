@@ -28,6 +28,19 @@ public class DayClosureController {
     @PostMapping("/close")
     @PreAuthorize("!hasRole('ADMINISTRATOR')")
     public DayStatusResponse close(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody CloseDayRequest request) {
-        return service.close(request.module(), request.date(), principal);
+        return service.close(request.module(), request.date(), Boolean.TRUE.equals(request.confirmNothingElse()), principal);
+    }
+
+    /** Entries still missing before this (past) day can be closed. */
+    @GetMapping("/missing")
+    public java.util.List<String> missing(@RequestParam Mod module, @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
+        return service.missingFor(module, date);
+    }
+
+    /** Feed Mill only: go back to an earlier day (reopens it and every later day). */
+    @PostMapping("/reopen")
+    public DayStatusResponse reopen(@AuthenticationPrincipal AuthenticatedPrincipal principal, @RequestParam Mod module,
+                                    @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate from) {
+        return service.reopenFrom(module, from, principal);
     }
 }

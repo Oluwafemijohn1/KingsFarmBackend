@@ -40,9 +40,13 @@ public class DayClosureService {
     /** Closed dates per module; small (about one entry per day) so it is simply cached and cleared on every change. */
     private final Map<Mod, Set<LocalDate>> cache = new java.util.concurrent.ConcurrentHashMap<>();
 
+    private final DayCompletenessService completeness;
+
     public DayClosureService(DayClosureRepository repository,
+                             DayCompletenessService completeness,
                              @Value("${app.golive.start-date:2026-11-01}") String startDate) {
         this.repository = repository;
+        this.completeness = completeness;
         this.startDate = LocalDate.parse(startDate);
     }
 
@@ -90,9 +94,38 @@ public class DayClosureService {
         return new DayStatusResponse(startDate, today, working, behind, closed.contains(today));
     }
 
+    /** What is still missing before a past day can be closed (always empty for today). */
+    @Transactional(readOnly = true)
+    public java.util.List<String> missingFor(Mod module, LocalDate date) {
+        if (!date.isBefore(LocalDate.now())) {
+            return java.util.List.of();
+        }
+        return completeness.missing(module, date);
+    }
+
+    /** Feed Mill only: reopen every closed day from {@code from} so entries can be made from that day again. */
+    @Audited(module = Mod.ADMIN, action = "Reopen Days", detail = "#module + ' from ' + #from")
+    @Transactional
+    public DayStatusResponse reopenFrom(Mod module, LocalDate from, AuthenticatedPrincipal principal) {
+        if (module != Mod.FEED_MILL) {
+            throw new BadRequestException("Going back to earlier days is only available for the Feed Mill.");
+        }
+        boolean allowed = principal.role() == Role.ADMINISTRATOR || principal.role() == Role.FEED_MILL_MANAGER
+                || (principal.extraRoles() != null && principal.extraRoles().contains(Role.FEED_MILL_MANAGER));
+        if (!allowed) {
+            throw new ForbiddenException("Only the Feed Mill Manager or the Administrator can go back to an earlier day.");
+        }
+        if (from.isBefore(startDate) || from.isAfter(LocalDate.now())) {
+            throw new BadRequestException("Pick a day between " + startDate + " and today.");
+        }
+        repository.deleteAll(repository.findAllByModuleAndClosedDateGreaterThanEqual(module, from));
+        invalidate();
+        return status(module);
+    }
+
     @Audited(module = Mod.ADMIN, action = "Close Day", detail = "#module + ' / ' + #date")
     @Transactional
-    public DayStatusResponse close(Mod module, LocalDate date, AuthenticatedPrincipal principal) {
+    public DayStatusResponse close(Mod module, LocalDate date, boolean confirmNothingElse, AuthenticatedPrincipal principal) {
         Role owner = OWNER.get(module);
         if (owner == null) {
             throw new BadRequestException("Days are not closed for this module.");
@@ -110,6 +143,13 @@ public class DayClosureService {
             throw new BadRequestException(working == null
                     ? "That day is already closed."
                     : "Close days in order — the next day to close is " + working + ".");
+        }
+        if (!confirmNothingElse) {
+            java.util.List<String> missing = missingFor(module, date);
+            if (!missing.isEmpty()) {
+                throw new BadRequestException("Before closing " + date + " please enter: " + String.join("; ", missing)
+                        + ". If nothing happened on that day, confirm it and close anyway.");
+            }
         }
         repository.save(DayClosure.builder().module(module).closedDate(date).closedBy(principal.username()).build());
         invalidate();
