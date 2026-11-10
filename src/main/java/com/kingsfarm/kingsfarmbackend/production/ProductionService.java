@@ -249,6 +249,24 @@ public class ProductionService {
         return dayStateRepository.findByEntryDate(day).orElse(null);
     }
 
+    /** The day after the given one that has a row (null if none) - a finished day's closing is that row's opening. */
+    public ProductionDayState nextDayStateAfter(LocalDate day) {
+        return dayStateRepository.findFirstByEntryDateGreaterThanOrderByEntryDateAsc(day).orElse(null);
+    }
+
+    /** Crack Egg: sets the Good (or Rough) Crack opening of one working day; later days and the live figure follow. */
+    @Transactional
+    public void setCrackOpeningForDay(boolean good, double value, LocalDate day, String username) {
+        ProductionDayState state = dayStateForEdit(day);
+        double before = good ? state.getCrackGoodOpen() : state.getCrackRoughOpen();
+        if (good) state.setCrackGoodOpen(value); else state.setCrackRoughOpen(value);
+        stamp(state, username);
+        ProductionDayState saved = dayStateRepository.save(state);
+        if (saved.getEntryDate().isBefore(LocalDate.now())) {
+            carryCrackDelta(saved.getEntryDate(), good ? value - before : 0, good ? 0 : value - before);
+        }
+    }
+
     private double wholeEggGift(CatKey category) {
         return wholeEggService.giftFor(category);
     }

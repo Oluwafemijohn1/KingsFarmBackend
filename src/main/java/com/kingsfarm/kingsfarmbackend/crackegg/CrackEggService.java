@@ -112,8 +112,9 @@ public class CrackEggService {
         if (day.isEqual(LocalDate.now())) {
             throw new BadRequestException("For today, use the normal fields.");
         }
-        if (request.qty() <= 0) {
-            throw new BadRequestException("Enter a quantity above zero.");
+        // A negative quantity takes away something entered by mistake or lowers an earlier figure for that day.
+        if (request.qty() == 0) {
+            throw new BadRequestException("Enter a quantity.");
         }
         if (request.kind() == com.kingsfarm.kingsfarmbackend.crackegg.dto.PastCrackAdjustmentRequest.Kind.GOOD_GIFT) {
             productionService.carryCrackDelta(day, -request.qty(), 0);
@@ -192,13 +193,55 @@ public class CrackEggService {
         );
     }
 
+    /**
+     * Stock for the day being worked on. Today = the live figures. A finished day = that day's own opening
+     * (kept per day), what was produced/classified into it, its sales, and its closing - which is by
+     * construction the next day's opening - so gifts and Feed Mill usage are whatever is left between them.
+     */
+    @Transactional(readOnly = true)
+    public StockSummaryResponse stockSummary(LocalDate date) {
+        if (date == null || !date.isBefore(LocalDate.now())) {
+            return stockSummary();
+        }
+        ProductionDayState day = productionService.dayStateFor(date);
+        ProductionDayState next = productionService.nextDayStateAfter(date);
+        if (day == null || next == null) {
+            return stockSummary();
+        }
+        CrackEggState s = peekState();
+        double gcOpening = day.getCrackGoodOpen();
+        double rcOpening = day.getCrackRoughOpen();
+        double gcProduced = day.getCrackGoodProd();
+        double gcReceived = day.getGoodClassify();
+        double rcProduced = day.getCrackRoughProd();
+        double rcReceived = day.getRoughClassify();
+        double gcSales = goodSalesQty(date);
+        double gcRevenue = saleRepository.sumRevenueBetween(com.kingsfarm.kingsfarmbackend.common.AppDay.start(date), com.kingsfarm.kingsfarmbackend.common.AppDay.end(date));
+        double gcClosing = next.getCrackGoodOpen();
+        double rcClosing = next.getCrackRoughOpen();
+        double gcGift = Math.max(gcOpening + gcProduced + gcReceived - gcSales - gcClosing, 0);
+        double rcFeedMill = Math.max(rcOpening + rcProduced + rcReceived - rcClosing, 0);
+        return new StockSummaryResponse(
+                gcOpening, lockService.isLocked(Mod.CRACK_EGG, "good"), gcProduced, gcReceived,
+                s.getGcSellingPrice(), gcGift, "", "",
+                gcSales, gcRevenue, gcClosing,
+                rcOpening, lockService.isLocked(Mod.CRACK_EGG, "rough"), rcProduced, rcReceived,
+                rcFeedMill, rcClosing
+        );
+    }
+
     // ── Good Crack scalar fields ─────────────────────────────────────────
 
     @Audited(module = Mod.CRACK_EGG, action = "Update Opening Stock", detail = "'Good Crack -> ' + #request.value()")
     @Transactional
-    public void setGcOpening(UpdateIntValueRequest request) {
+    public void setGcOpening(UpdateIntValueRequest request, String username) {
         if (lockService.isLocked(Mod.CRACK_EGG, "good")) {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
+        }
+        if (request.date() != null && request.date().isBefore(LocalDate.now())) {
+            resolveEntryDay(request.date());
+            productionService.setCrackOpeningForDay(true, request.value(), request.date(), username);
+            return;
         }
         CrackEggState s = state();
         s.setGcOpening(request.value());
@@ -212,9 +255,14 @@ public class CrackEggService {
 
     @Audited(module = Mod.CRACK_EGG, action = "Update Opening Stock", detail = "'Rough Crack -> ' + #request.value()")
     @Transactional
-    public void setRcOpening(UpdateIntValueRequest request) {
+    public void setRcOpening(UpdateIntValueRequest request, String username) {
         if (lockService.isLocked(Mod.CRACK_EGG, "rough")) {
             throw new ForbiddenException("Opening Stock is locked. Submit an Opening Stock request for the Administrator to approve.");
+        }
+        if (request.date() != null && request.date().isBefore(LocalDate.now())) {
+            resolveEntryDay(request.date());
+            productionService.setCrackOpeningForDay(false, request.value(), request.date(), username);
+            return;
         }
         CrackEggState s = state();
         s.setRcOpening(request.value());
@@ -280,7 +328,7 @@ public class CrackEggService {
         LocalDate day = resolveEntryDay(request.date());
         boolean past = !day.isEqual(LocalDate.now());
 
-        StockSummaryResponse summary = stockSummary();
+        StockSummaryResponse summary = stockSummary(day);
         if (request.qty() > summary.gcClosing()) {
             throw new BadRequestException("Cannot sell " + request.qty() + " — only " + summary.gcClosing() + " Good Crack available.");
         }
