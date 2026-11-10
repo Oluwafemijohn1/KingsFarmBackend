@@ -192,6 +192,12 @@ public class WholeEggController {
         service.deleteTransaction(id);
     }
 
+    @PatchMapping("/transactions/{id}/opening-date")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public void moveOpeningDate(@PathVariable Long id, @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        service.moveOpeningBalanceDate(id, date);
+    }
+
     @PatchMapping("/transactions/{id}/verification")
     @PreAuthorize("hasRole('ADMINISTRATOR')")
     public WeSaleTransactionResponse verifyTransaction(@AuthenticationPrincipal AuthenticatedPrincipal principal,

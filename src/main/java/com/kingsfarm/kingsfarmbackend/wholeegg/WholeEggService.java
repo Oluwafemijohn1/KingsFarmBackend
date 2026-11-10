@@ -664,6 +664,32 @@ public class WholeEggService {
     }
 
     /**
+     * Administrator-only (switched by TRANSACTION_DELETE_ENABLED): moves a customer's Opening Balance to the day it
+     * really applied from (e.g. it was typed in days after go-live). It is placed at the very start of that day so it
+     * comes before that day's sales, and the customer's running balances are re-walked so overpayments and credit net
+     * correctly.
+     */
+    @Audited(module = Mod.WHOLE_EGG, action = "Move Opening Balance Date", type = LogType.AUDIT, detail = "'Transaction #' + #id + ' -> ' + #date")
+    @Transactional
+    public void moveOpeningBalanceDate(Long id, LocalDate date) {
+        if (!transactionDeleteEnabled) {
+            throw new ForbiddenException("Changing transactions is switched off.");
+        }
+        WeSaleTransaction txn = transactionRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
+        if (txn.getType() != WeSaleTxnType.OPENING) {
+            throw new BadRequestException("Only an opening balance can be moved here.");
+        }
+        if (date == null || date.isAfter(LocalDate.now())) {
+            throw new BadRequestException("Choose a day that is not in the future.");
+        }
+        Instant when = date.atStartOfDay(ZoneId.systemDefault()).plusMinutes(1).toInstant();
+        txn.setOccurredAt(when);
+        txn.setTxnYear(date.getYear());
+        transactionRepository.saveAndFlush(txn);
+        recomputeLedger(txn.getCustomer());
+    }
+
+    /**
      * Administrator-only (switched by TRANSACTION_DELETE_ENABLED): wipes the crack use and gifts recorded for a finished
      * day, e.g. after the same figure was saved several times. Stock is put back and later days' openings rise by the same
      * amounts; the day's Total Crack Use goes back to zero.
