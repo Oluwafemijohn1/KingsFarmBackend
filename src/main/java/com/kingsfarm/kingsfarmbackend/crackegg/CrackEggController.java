@@ -28,14 +28,14 @@ public class CrackEggController {
     }
 
     @GetMapping("/stock")
-    public StockSummaryResponse stockSummary() {
-        return service.stockSummary();
+    public StockSummaryResponse stockSummary(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.stockSummary(date);
     }
 
     @PatchMapping("/stock/good-opening")
     @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
-    public void setGcOpening(@Valid @RequestBody UpdateIntValueRequest request) {
-        service.setGcOpening(request);
+    public void setGcOpening(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody UpdateIntValueRequest request) {
+        service.setGcOpening(request, principal.username());
     }
 
     @PostMapping("/stock/good-opening/lock")
@@ -46,8 +46,8 @@ public class CrackEggController {
 
     @PatchMapping("/stock/rough-opening")
     @PreAuthorize("hasRole('CRACK_EGG_MANAGER')")
-    public void setRcOpening(@Valid @RequestBody UpdateIntValueRequest request) {
-        service.setRcOpening(request);
+    public void setRcOpening(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody UpdateIntValueRequest request) {
+        service.setRcOpening(request, principal.username());
     }
 
     @PostMapping("/stock/rough-opening/lock")
