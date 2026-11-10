@@ -87,6 +87,13 @@ public class MortalityController {
         return MortSaleResponse.from(entry, service.isEditableInstant(entry.getOccurredAt()));
     }
 
+    /** Manager cancels a mistaken sale while its day is still open (no switch needed). */
+    @DeleteMapping("/sales/{id}/cancel")
+    @PreAuthorize("hasRole('MORTALITY_MANAGER')")
+    public void cancelSale(@PathVariable Long id) {
+        service.cancelSale(id);
+    }
+
     @GetMapping("/sales")
     public PageResponse<MortSaleResponse> saleHistory(@RequestParam(required = false) String bank,
                                                       @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,

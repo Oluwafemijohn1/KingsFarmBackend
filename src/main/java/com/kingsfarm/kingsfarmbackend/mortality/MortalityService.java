@@ -436,8 +436,19 @@ public class MortalityService {
             throw new ForbiddenException("This day isn't open for entry. Days must be entered in order - the banner at the top shows the day to work on. A day that is already closed needs the Administrator's permission.");
         }
         int oldQty = entry.getQty();
+        MortCat oldCategory = entry.getCategory();
+        MortCat newCategory = request.category() == null ? oldCategory : request.category();
+        if (!newCategory.saleable()) {
+            throw new BadRequestException("Sales are only allowed for Good, Dry, and Runt.");
+        }
+        // Stock available to this sale: what is left now, plus what this sale itself currently holds if it stays in the same category.
+        int available = closingFor(newCategory) + (newCategory == oldCategory ? oldQty : 0);
+        if (request.qty() > available) {
+            throw new BadRequestException("Cannot sell " + request.qty() + " - only " + available + " " + newCategory + " available.");
+        }
         entry.setCustomer(request.customer());
         entry.setState(request.state());
+        entry.setCategory(newCategory);
         entry.setQty(request.qty());
         entry.setPrice(request.price());
         entry.setCredit(request.credit());
@@ -445,9 +456,32 @@ public class MortalityService {
         entry.setUpdatedBy(username);
         MortSaleEntry saved = saleRepository.save(entry);
         if (saved.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now())) {
-            carryDelta(saved.getCategory(), oldQty - request.qty());
+            // A past day's stock is carried forward by hand: give the old category its birds back, take the new ones off.
+            carryDelta(oldCategory, oldQty);
+            carryDelta(newCategory, -request.qty());
         }
         return saved;
+    }
+
+    /**
+     * The manager cancels a sale entered by mistake while its day is still open. The birds go back into stock
+     * (and into later days' openings if it is a past day).
+     */
+    @Audited(module = Mod.MORTALITY, action = "Cancel Sale", type = LogType.AUDIT, detail = "'Transaction #' + #id")
+    @Transactional
+    public void cancelSale(Long id) {
+        MortSaleEntry entry = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
+        if (!isEditableInstant(entry.getOccurredAt())) {
+            throw new ForbiddenException("This day isn't open for entry, so the sale can't be cancelled here. Ask the Administrator.");
+        }
+        LocalDate day = entry.getOccurredAt().atZone(ZONE).toLocalDate();
+        MortCat category = entry.getCategory();
+        int qty = entry.getQty();
+        saleRepository.delete(entry);
+        saleRepository.flush();
+        if (day.isBefore(LocalDate.now())) {
+            carryDelta(category, qty);
+        }
     }
 
     @org.springframework.beans.factory.annotation.Value("${app.transactions.delete-enabled:false}")
