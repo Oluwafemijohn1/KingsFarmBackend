@@ -103,6 +103,25 @@ public class DayClosureService {
         return completeness.missing(module, date);
     }
 
+    /**
+     * Run once when a day ends. A module that was up to date (the day that just ended was its working day)
+     * and has everything entered for it is closed automatically - nobody has to press Close for "today".
+     * A day with missing records is left open so the manager can still enter them.
+     */
+    @Transactional
+    public void autoCloseFinishedDay(LocalDate day) {
+        for (Mod module : OWNER.keySet()) {
+            try {
+                if (day.equals(firstUnclosed(module)) && completeness.missing(module, day).isEmpty()) {
+                    repository.save(DayClosure.builder().module(module).closedDate(day).closedBy("system").build());
+                    invalidate();
+                }
+            } catch (RuntimeException ignored) {
+                // never let one module stop the daily rollover
+            }
+        }
+    }
+
     /** Feed Mill only: reopen every closed day from {@code from} so entries can be made from that day again. */
     @Audited(module = Mod.ADMIN, action = "Reopen Days", detail = "#module + ' from ' + #from")
     @Transactional

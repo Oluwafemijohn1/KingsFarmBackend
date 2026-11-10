@@ -38,6 +38,8 @@ public class DailyRolloverService {
     private final MortalityService mortalityService;
     private final TransactionTemplate tx;
 
+    private final com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosureService;
+
     private volatile LocalDate checkedDate;
 
     public DailyRolloverService(DailyRolloverStateRepository stateRepository,
@@ -46,7 +48,9 @@ public class DailyRolloverService {
                                 CrackEggService crackEggService,
                                 FeedMillService feedMillService,
                                 MortalityService mortalityService,
+                                com.kingsfarm.kingsfarmbackend.backfill.DayClosureService dayClosureService,
                                 PlatformTransactionManager transactionManager) {
+        this.dayClosureService = dayClosureService;
         this.stateRepository = stateRepository;
         this.productionService = productionService;
         this.wholeEggService = wholeEggService;
@@ -116,6 +120,11 @@ public class DailyRolloverService {
             state.setLastDate(today);
             stateRepository.save(state);
         });
+        try {
+            dayClosureService.autoCloseFinishedDay(prev);
+        } catch (RuntimeException e) {
+            log.warn("Automatic day closing failed for {}", prev, e);
+        }
         log.info("Daily rollover complete: {} closing stock is now {} opening stock", prev, today);
     }
 }
