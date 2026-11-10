@@ -184,23 +184,39 @@ public class MortalityService {
         return List.of(MortCat.values()).stream().map(this::stockRow).toList();
     }
 
-    /** What changed a category's stock on one finished day (gifts for past days are not tracked separately). */
-    /** Gifts recorded afterwards for a finished day (added to that day), per category. */
+    /**
+     * Every gift that belongs to a finished day, per category: the ones made on the day itself (already taken
+     * off the stock when the day rolled over) and the ones added afterwards.
+     */
     private int lateGiftOn(MortCat category, LocalDate day) {
         if (!category.saleable()) {
             return 0;
         }
         int total = 0;
-        for (MortGiftLogEntry g : giftLogRepository.findAllByForFinishedDayTrueAndOccurredAtGreaterThanEqualAndOccurredAtLessThan(
+        MortGiftLogEntry latestLive = null;
+        for (MortGiftLogEntry g : giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(
                 com.kingsfarm.kingsfarmbackend.common.AppDay.start(day), com.kingsfarm.kingsfarmbackend.common.AppDay.end(day))) {
-            total += switch (category) {
-                case GOOD -> g.getGood();
-                case DRY -> g.getDry();
-                case RUNT -> g.getRunt();
-                default -> 0;
-            };
+            if (g.isForFinishedDay()) {
+                // Added after the day closed: each one adds to that day.
+                total += giftQtyOf(g, category);
+            } else if (latestLive == null || g.getOccurredAt().isAfter(latestLive.getOccurredAt())) {
+                latestLive = g;
+            }
+        }
+        // A gift saved on the day itself overwrites that day's gift total, so only the last save counts.
+        if (latestLive != null) {
+            total += giftQtyOf(latestLive, category);
         }
         return total;
+    }
+
+    private static int giftQtyOf(MortGiftLogEntry g, MortCat category) {
+        return switch (category) {
+            case GOOD -> g.getGood();
+            case DRY -> g.getDry();
+            case RUNT -> g.getRunt();
+            default -> 0;
+        };
     }
 
     private int netOn(MortCat category, LocalDate day) {
