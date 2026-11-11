@@ -410,6 +410,50 @@ public class CrackEggService {
         return giftLogRepository.save(entry);
     }
 
+    @org.springframework.beans.factory.annotation.Value("${app.transactions.delete-enabled:false}")
+    private boolean transactionChangeEnabled;
+
+    public boolean isTransactionChangeEnabled() {
+        return transactionChangeEnabled;
+    }
+
+    /**
+     * Administrator-only (switched by TRANSACTION_DELETE_ENABLED): a gift that was saved on the wrong day is moved to the
+     * day it belongs to. The days in between get the gift taken off their closing stock (and so off the next day's opening);
+     * days after the gift's old day already had it, so they are not touched twice.
+     */
+    @Audited(module = Mod.CRACK_EGG, action = "Move Gift To Another Day", type = LogType.AUDIT, detail = "'Entry #' + #id + ' -> ' + #newDay")
+    @Transactional
+    public CrackEggGiftLogEntry moveGiftDate(Long id, LocalDate newDay) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Changing transactions is switched off.");
+        }
+        LocalDate today = LocalDate.now();
+        if (newDay == null || !newDay.isBefore(today)) {
+            throw new BadRequestException("Choose a finished day (before today).");
+        }
+        CrackEggGiftLogEntry entry = giftLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Gift log entry not found."));
+        LocalDate oldDay = entry.getOccurredAt().atZone(ZONE).toLocalDate();
+        if (oldDay.equals(newDay)) {
+            return entry;
+        }
+        double qty = entry.getQty();
+        if (oldDay.isEqual(today)) {
+            // Still in today's live figure: take it out of today, then apply it to the finished day and everything after.
+            CrackEggState s = state();
+            s.setGcGiftQty(Math.max(s.getGcGiftQty() - qty, 0));
+            stateRepository.save(s);
+            productionService.carryCrackDelta(newDay, -qty, 0);
+        } else if (newDay.isBefore(oldDay)) {
+            productionService.shiftGoodCrackOpenings(newDay, oldDay, -qty);
+        } else {
+            productionService.shiftGoodCrackOpenings(oldDay, newDay, qty);
+        }
+        entry.setOccurredAt(newDay.atTime(12, 0).atZone(ZONE).toInstant());
+        entry.setUpdatedBy("administrator");
+        return giftLogRepository.save(entry);
+    }
+
     @Transactional(readOnly = true)
     public Page<CrackEggGiftLogEntry> giftLogHistory(Pageable pageable) {
         return giftLogRepository.findAllByOrderByOccurredAtDesc(pageable);

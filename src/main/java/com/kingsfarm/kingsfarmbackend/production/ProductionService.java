@@ -254,6 +254,17 @@ public class ProductionService {
         return dayStateRepository.findFirstByEntryDateGreaterThanOrderByEntryDateAsc(day).orElse(null);
     }
 
+    /** Moves the Good Crack opening of every day after {@code fromExclusive} up to and including {@code toInclusive} (used when a gift is moved between two finished days). */
+    @Transactional
+    public void shiftGoodCrackOpenings(LocalDate fromExclusive, LocalDate toInclusive, double delta) {
+        for (ProductionDayState d : dayStateRepository.findAllByEntryDateGreaterThan(fromExclusive)) {
+            if (!d.getEntryDate().isAfter(toInclusive)) {
+                d.setCrackGoodOpen(d.getCrackGoodOpen() + delta);
+                dayStateRepository.save(d);
+            }
+        }
+    }
+
     /** Crack Egg: sets the Good (or Rough) Crack opening of one working day; later days and the live figure follow. */
     @Transactional
     public void setCrackOpeningForDay(boolean good, double value, LocalDate day, String username) {
