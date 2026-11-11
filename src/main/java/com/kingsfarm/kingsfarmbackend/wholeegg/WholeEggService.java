@@ -864,7 +864,9 @@ public class WholeEggService {
             new ReportColumn("txns", "Transactions", true),
             new ReportColumn("crates", "Crates Sold", true),
             new ReportColumn("revenue", "Revenue", false),
-            new ReportColumn("avg", "Avg/Txn", false)
+            new ReportColumn("avg", "Avg/Txn", false),
+            new ReportColumn("opening", "Opening Stock (crates)", true),
+            new ReportColumn("closing", "Closing Stock (crates)", true)
     );
 
     @Transactional(readOnly = true)
@@ -875,8 +877,16 @@ public class WholeEggService {
                 .collect(Collectors.groupingBy(t -> t.getOccurredAt().atZone(ZONE).toLocalDate()));
         Map<LocalDate, List<WeSaleLineItemRepository.SaleLineProjection>> linesByDate = lineItemsInRange(rangeStart, rangeEnd).stream()
                 .collect(Collectors.groupingBy(li -> li.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, double[]> stockByDay = productionService.eggStockByDay(start, end);
+        double[] noStock = new double[]{0, 0};
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), txnsByDate.getOrDefault(date, List.of()), linesByDate.getOrDefault(date, List.of())))
+                .map(date -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.dayLabel(date), txnsByDate.getOrDefault(date, List.of()), linesByDate.getOrDefault(date, List.of()));
+                    double[] st = stockByDay.getOrDefault(date, noStock);
+                    row.put("opening", st[0]);
+                    row.put("closing", st[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -890,8 +900,15 @@ public class WholeEggService {
                 .collect(Collectors.groupingBy(t -> YearMonth.from(t.getOccurredAt().atZone(ZONE).toLocalDate())));
         Map<YearMonth, List<WeSaleLineItemRepository.SaleLineProjection>> linesByMonth = lineItemsInRange(rangeStart, rangeEnd).stream()
                 .collect(Collectors.groupingBy(li -> YearMonth.from(li.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<LocalDate, double[]> stockByDay = productionService.eggStockByDay(monthsList.get(0).atDay(1), monthsList.get(monthsList.size() - 1).atEndOfMonth());
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), txnsByMonth.getOrDefault(month, List.of()), linesByMonth.getOrDefault(month, List.of())))
+                .map(month -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.monthLabel(month), txnsByMonth.getOrDefault(month, List.of()), linesByMonth.getOrDefault(month, List.of()));
+                    double[] st = ProductionService.monthEnds(stockByDay, month, 2, 0);
+                    row.put("opening", st[0]);
+                    row.put("closing", st[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }

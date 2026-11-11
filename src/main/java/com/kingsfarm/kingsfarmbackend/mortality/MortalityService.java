@@ -771,8 +771,24 @@ public class MortalityService {
             new ReportColumn("salesRevenue", "Sales Revenue", false),
             new ReportColumn("gifts", "Gifted", true),
             new ReportColumn("catfish", "Green → Catfish", true),
-            new ReportColumn("disposal", "PM/Reject → Disposal", true)
+            new ReportColumn("disposal", "PM/Reject → Disposal", true),
+            new ReportColumn("opening", "Opening Stock", true),
+            new ReportColumn("closing", "Closing Stock", true)
     );
+
+    /** [opening, closing] of all categories added up for one day (null when the day hasn't started). */
+    private int[] stockEnds(LocalDate day) {
+        if (day.isAfter(LocalDate.now())) {
+            return null;
+        }
+        int open = 0;
+        int close = 0;
+        for (MortCategoryStockRow r : stockOverview(day)) {
+            open += r.opening();
+            close += r.closing();
+        }
+        return new int[]{open, close};
+    }
 
     @Transactional(readOnly = true)
     public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
@@ -787,8 +803,14 @@ public class MortalityService {
         Map<LocalDate, MortCatfishDisposalState> disposalByDate = catfishDisposalRepository.findAllByEntryDateBetween(start, end).stream()
                 .collect(Collectors.toMap(MortCatfishDisposalState::getEntryDate, s -> s));
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), penByDate.getOrDefault(date, List.of()),
-                        salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), disposalByDate.get(date)))
+                .map(date -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.dayLabel(date), penByDate.getOrDefault(date, List.of()),
+                            salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), disposalByDate.get(date));
+                    int[] st = stockEnds(date);
+                    row.put("opening", st == null ? 0 : st[0]);
+                    row.put("closing", st == null ? 0 : st[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -809,9 +831,18 @@ public class MortalityService {
         Map<YearMonth, List<MortCatfishDisposalState>> disposalByMonth = catfishDisposalRepository.findAllByEntryDateBetween(start, end).stream()
                 .collect(Collectors.groupingBy(s -> YearMonth.from(s.getEntryDate())));
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), penByMonth.getOrDefault(month, List.of()),
-                        salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()),
-                        sumDisposalStates(disposalByMonth.getOrDefault(month, List.of()))))
+                .map(month -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.monthLabel(month), penByMonth.getOrDefault(month, List.of()),
+                            salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()),
+                            sumDisposalStates(disposalByMonth.getOrDefault(month, List.of())));
+                    // A month opens with its first day's opening and closes with its last (or today's, if it is the current month).
+                    LocalDate lastDay = month.atEndOfMonth().isAfter(LocalDate.now()) ? LocalDate.now() : month.atEndOfMonth();
+                    int[] first = stockEnds(month.atDay(1));
+                    int[] last = stockEnds(lastDay);
+                    row.put("opening", first == null ? 0 : first[0]);
+                    row.put("closing", last == null ? 0 : last[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
