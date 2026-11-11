@@ -682,8 +682,45 @@ public class ProductionService {
             new ReportColumn("md", "Medium", true),
             new ReportColumn("sm", "Small", true),
             new ReportColumn("pl", "Pullet", true),
-            new ReportColumn("wh", "White", true)
+            new ReportColumn("wh", "White", true),
+            new ReportColumn("crack", "Crack (from Whole Egg)", true),
+            new ReportColumn("goodCrack", "Good Crack", true),
+            new ReportColumn("roughCrack", "Rough Crack", true)
     );
+
+    /** Per day in a range: [Good crack received by Crack Egg, Rough crack received] = production's own crack plus what Crack Egg classified from Whole Egg. */
+    @Transactional(readOnly = true)
+    public Map<LocalDate, double[]> crackReceivedBetween(LocalDate start, LocalDate end) {
+        Map<LocalDate, double[]> map = new java.util.HashMap<>();
+        for (ProductionDayState s : dayStateRepository.findAllByEntryDateGreaterThan(start.minusDays(1))) {
+            if (!s.getEntryDate().isAfter(end)) {
+                map.put(s.getEntryDate(), new double[]{s.getCrackGoodProd() + s.getGoodClassify(), s.getCrackRoughProd() + s.getRoughClassify()});
+            }
+        }
+        return map;
+    }
+
+    /** Crack figures for one day: [crack use received from Whole Egg, classified Good, classified Rough]. */
+    private double[] crackFigures(ProductionDayState s) {
+        double total;
+        if (s.getEntryDate().isBefore(LocalDate.now())) {
+            total = s.getCrackFromWholeSnapshot() == null ? 0 : s.getCrackFromWholeSnapshot();
+        } else {
+            total = 0;
+            for (CatKey k : CatKey.values()) total += wholeEggCrackUse(k);
+        }
+        return new double[]{total, s.getGoodClassify(), s.getRoughClassify()};
+    }
+
+    private Map<LocalDate, double[]> crackByDayInRange(LocalDate start, LocalDate end) {
+        Map<LocalDate, double[]> map = new java.util.HashMap<>();
+        for (ProductionDayState s : dayStateRepository.findAllByEntryDateGreaterThan(start.minusDays(1))) {
+            if (!s.getEntryDate().isAfter(end)) {
+                map.put(s.getEntryDate(), crackFigures(s));
+            }
+        }
+        return map;
+    }
 
     /** Every pen's real closing stock in a range, summed per day — one query for the whole range rather than one per day/month (see reportRow callers below). */
     private Map<LocalDate, Integer> birdClosingByDayInRange(LocalDate start, LocalDate end) {
@@ -696,8 +733,10 @@ public class ProductionService {
         List<ProductionPenEntry> entries = penEntryRepository.findAllByEntryDateBetween(start, end);
         Map<LocalDate, List<ProductionPenEntry>> byDate = entries.stream().collect(Collectors.groupingBy(ProductionPenEntry::getEntryDate));
         Map<LocalDate, Integer> birdClosingByDay = birdClosingByDayInRange(start, end);
+        Map<LocalDate, double[]> crackByDay = crackByDayInRange(start, end);
+        double[] none = new double[]{0, 0, 0};
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of()), birdClosingByDay.getOrDefault(date, 0)))
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of()), birdClosingByDay.getOrDefault(date, 0), crackByDay.getOrDefault(date, none)))
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -713,13 +752,19 @@ public class ProductionService {
         Map<LocalDate, Integer> birdClosingByDay = birdClosingByDayInRange(start, end);
         Map<YearMonth, Integer> birdClosingByMonth = birdClosingByDay.entrySet().stream()
                 .collect(Collectors.groupingBy(e -> YearMonth.from(e.getKey()), Collectors.summingInt(Map.Entry::getValue)));
+        Map<YearMonth, double[]> crackByMonth = new java.util.HashMap<>();
+        crackByDayInRange(start, end).forEach((day, v) -> {
+            double[] m = crackByMonth.computeIfAbsent(YearMonth.from(day), k -> new double[]{0, 0, 0});
+            for (int i = 0; i < 3; i++) m[i] += v[i];
+        });
+        double[] none = new double[]{0, 0, 0};
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of()), birdClosingByMonth.getOrDefault(month, 0)))
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of()), birdClosingByMonth.getOrDefault(month, 0), crackByMonth.getOrDefault(month, none)))
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
 
-    private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod) {
+    private Map<String, Object> reportRow(String periodLabel, List<ProductionPenEntry> entries, int birdClosingForPeriod, double[] crack) {
         double xl = entries.stream().mapToDouble(ProductionPenEntry::getQtyXl).sum();
         double lg = entries.stream().mapToDouble(ProductionPenEntry::getQtyLg).sum();
         double md = entries.stream().mapToDouble(ProductionPenEntry::getQtyMd).sum();
@@ -737,6 +782,9 @@ public class ProductionService {
         row.put("sm", sm);
         row.put("pl", pl);
         row.put("wh", wh);
+        row.put("crack", crack[0]);
+        row.put("goodCrack", crack[1]);
+        row.put("roughCrack", crack[2]);
         return row;
     }
 }

@@ -467,7 +467,9 @@ public class CrackEggService {
     private static final List<ReportColumn> REPORT_COLUMNS = List.of(
             new ReportColumn("goodSales", "Good Crack Sales (qty)", true),
             new ReportColumn("goodRevenue", "Good Crack Revenue", false),
-            new ReportColumn("gifts", "Gifted", true)
+            new ReportColumn("gifts", "Gifted", true),
+            new ReportColumn("goodReceived", "Good Crack Received", true),
+            new ReportColumn("roughReceived", "Rough Crack Received", true)
     );
 
     @Transactional(readOnly = true)
@@ -478,8 +480,10 @@ public class CrackEggService {
                 .collect(Collectors.groupingBy(t -> t.getOccurredAt().atZone(ZONE).toLocalDate()));
         Map<LocalDate, List<CrackEggGiftLogEntry>> giftsByDate = giftsInRange(rangeStart, rangeEnd).stream()
                 .collect(Collectors.groupingBy(g -> g.getOccurredAt().atZone(ZONE).toLocalDate()));
+        Map<LocalDate, double[]> received = productionService.crackReceivedBetween(start, end);
+        double[] none = new double[]{0, 0};
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of())))
+                .map(date -> reportRow(ReportPeriods.dayLabel(date), salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), received.getOrDefault(date, none)))
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -493,8 +497,15 @@ public class CrackEggService {
                 .collect(Collectors.groupingBy(t -> YearMonth.from(t.getOccurredAt().atZone(ZONE).toLocalDate())));
         Map<YearMonth, List<CrackEggGiftLogEntry>> giftsByMonth = giftsInRange(rangeStart, rangeEnd).stream()
                 .collect(Collectors.groupingBy(g -> YearMonth.from(g.getOccurredAt().atZone(ZONE).toLocalDate())));
+        Map<YearMonth, double[]> receivedByMonth = new java.util.HashMap<>();
+        productionService.crackReceivedBetween(monthsList.get(0).atDay(1), monthsList.get(monthsList.size() - 1).atEndOfMonth()).forEach((day, v) -> {
+            double[] m = receivedByMonth.computeIfAbsent(YearMonth.from(day), k -> new double[]{0, 0});
+            m[0] += v[0];
+            m[1] += v[1];
+        });
+        double[] none = new double[]{0, 0};
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of())))
+                .map(month -> reportRow(ReportPeriods.monthLabel(month), salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()), receivedByMonth.getOrDefault(month, none)))
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -507,7 +518,7 @@ public class CrackEggService {
         return giftLogRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThan(start, end);
     }
 
-    private Map<String, Object> reportRow(String periodLabel, List<GcSaleTransaction> sales, List<CrackEggGiftLogEntry> gifts) {
+    private Map<String, Object> reportRow(String periodLabel, List<GcSaleTransaction> sales, List<CrackEggGiftLogEntry> gifts, double[] received) {
         double goodSales = sales.stream().mapToDouble(GcSaleTransaction::getQty).sum();
         double goodRevenue = sales.stream().mapToDouble(t -> t.getQty() * t.getPrice()).sum();
         double giftQty = gifts.stream().mapToDouble(CrackEggGiftLogEntry::getQty).sum();
@@ -516,6 +527,8 @@ public class CrackEggService {
         row.put("goodSales", goodSales);
         row.put("goodRevenue", goodRevenue);
         row.put("gifts", giftQty);
+        row.put("goodReceived", received[0]);
+        row.put("roughReceived", received[1]);
         return row;
     }
 
