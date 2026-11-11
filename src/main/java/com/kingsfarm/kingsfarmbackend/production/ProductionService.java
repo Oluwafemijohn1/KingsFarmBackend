@@ -685,8 +685,69 @@ public class ProductionService {
             new ReportColumn("wh", "White", true),
             new ReportColumn("crack", "Crack (from Whole Egg)", true),
             new ReportColumn("goodCrack", "Good Crack", true),
-            new ReportColumn("roughCrack", "Rough Crack", true)
+            new ReportColumn("roughCrack", "Rough Crack", true),
+            new ReportColumn("eggOpening", "Opening Stock (crates)", true),
+            new ReportColumn("eggClosing", "Closing Stock (crates)", true)
     );
+
+    /** Per day in a range: [opening, closing] of the whole-egg stock, all categories added up. */
+    @Transactional(readOnly = true)
+    public Map<LocalDate, double[]> eggStockByDay(LocalDate start, LocalDate end) {
+        Map<LocalDate, double[]> map = new java.util.HashMap<>();
+        for (ProductionDayState s : dayStateRepository.findAllByEntryDateGreaterThan(start.minusDays(1))) {
+            if (s.getEntryDate().isAfter(end)) continue;
+            double open = 0;
+            double close = 0;
+            for (CategoryStockRow c : toResponse(s).categories()) {
+                open += c.opening();
+                close += c.closing();
+            }
+            map.put(s.getEntryDate(), new double[]{open, close});
+        }
+        return map;
+    }
+
+    /** Per day in a range: [Good opening, Good closing, Rough opening, Rough closing]; a finished day closes at the next day's opening. */
+    @Transactional(readOnly = true)
+    public Map<LocalDate, double[]> crackStockByDay(LocalDate start, LocalDate end) {
+        Map<LocalDate, double[]> map = new java.util.HashMap<>();
+        for (ProductionDayState s : dayStateRepository.findAllByEntryDateGreaterThan(start.minusDays(1))) {
+            LocalDate d = s.getEntryDate();
+            if (d.isAfter(end)) continue;
+            double gClose;
+            double rClose;
+            ProductionDayState next = d.isBefore(LocalDate.now()) ? dayStateRepository.findFirstByEntryDateGreaterThanOrderByEntryDateAsc(d).orElse(null) : null;
+            if (next != null) {
+                gClose = next.getCrackGoodOpen();
+                rClose = next.getCrackRoughOpen();
+            } else {
+                var live = crackEggService.stockSummary();
+                gClose = live.gcClosing();
+                rClose = live.rcClosing();
+            }
+            map.put(d, new double[]{s.getCrackGoodOpen(), gClose, s.getCrackRoughOpen(), rClose});
+        }
+        return map;
+    }
+
+    /** A month's opening/closing from its days: every index listed in {@code openIdx} comes from the first day, the rest from the last day. */
+    public static double[] monthEnds(Map<LocalDate, double[]> byDay, YearMonth month, int width, int... openIdx) {
+        LocalDate first = null;
+        LocalDate last = null;
+        for (LocalDate d : byDay.keySet()) {
+            if (!YearMonth.from(d).equals(month)) continue;
+            if (first == null || d.isBefore(first)) first = d;
+            if (last == null || d.isAfter(last)) last = d;
+        }
+        double[] out = new double[width];
+        if (first == null) return out;
+        for (int i = 0; i < width; i++) {
+            boolean fromFirst = false;
+            for (int o : openIdx) if (o == i) fromFirst = true;
+            out[i] = (fromFirst ? byDay.get(first) : byDay.get(last))[i];
+        }
+        return out;
+    }
 
     /** Per day in a range: [Good crack received by Crack Egg, Rough crack received] = production's own crack plus what Crack Egg classified from Whole Egg. */
     @Transactional(readOnly = true)
@@ -734,9 +795,17 @@ public class ProductionService {
         Map<LocalDate, List<ProductionPenEntry>> byDate = entries.stream().collect(Collectors.groupingBy(ProductionPenEntry::getEntryDate));
         Map<LocalDate, Integer> birdClosingByDay = birdClosingByDayInRange(start, end);
         Map<LocalDate, double[]> crackByDay = crackByDayInRange(start, end);
+        Map<LocalDate, double[]> stockByDay = eggStockByDay(start, end);
         double[] none = new double[]{0, 0, 0};
+        double[] noStock = new double[]{0, 0};
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of()), birdClosingByDay.getOrDefault(date, 0), crackByDay.getOrDefault(date, none)))
+                .map(date -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.dayLabel(date), byDate.getOrDefault(date, List.of()), birdClosingByDay.getOrDefault(date, 0), crackByDay.getOrDefault(date, none));
+                    double[] st = stockByDay.getOrDefault(date, noStock);
+                    row.put("eggOpening", st[0]);
+                    row.put("eggClosing", st[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -758,8 +827,15 @@ public class ProductionService {
             for (int i = 0; i < 3; i++) m[i] += v[i];
         });
         double[] none = new double[]{0, 0, 0};
+        Map<LocalDate, double[]> stockByDay = eggStockByDay(start, end);
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of()), birdClosingByMonth.getOrDefault(month, 0), crackByMonth.getOrDefault(month, none)))
+                .map(month -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.monthLabel(month), byMonth.getOrDefault(month, List.of()), birdClosingByMonth.getOrDefault(month, 0), crackByMonth.getOrDefault(month, none));
+                    double[] st = monthEnds(stockByDay, month, 2, 0);
+                    row.put("eggOpening", st[0]);
+                    row.put("eggClosing", st[1]);
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }

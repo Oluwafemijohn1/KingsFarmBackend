@@ -469,8 +469,19 @@ public class CrackEggService {
             new ReportColumn("goodRevenue", "Good Crack Revenue", false),
             new ReportColumn("gifts", "Gifted", true),
             new ReportColumn("goodReceived", "Good Crack Received", true),
-            new ReportColumn("roughReceived", "Rough Crack Received", true)
+            new ReportColumn("roughReceived", "Rough Crack Received", true),
+            new ReportColumn("goodOpening", "Good Crack Opening", true),
+            new ReportColumn("goodClosing", "Good Crack Closing", true),
+            new ReportColumn("roughOpening", "Rough Crack Opening", true),
+            new ReportColumn("roughClosing", "Rough Crack Closing", true)
     );
+
+    private static void putStock(Map<String, Object> row, double[] s) {
+        row.put("goodOpening", s[0]);
+        row.put("goodClosing", s[1]);
+        row.put("roughOpening", s[2]);
+        row.put("roughClosing", s[3]);
+    }
 
     @Transactional(readOnly = true)
     public ReportTableResponse dailyReport(LocalDate start, LocalDate end) {
@@ -482,8 +493,14 @@ public class CrackEggService {
                 .collect(Collectors.groupingBy(g -> g.getOccurredAt().atZone(ZONE).toLocalDate()));
         Map<LocalDate, double[]> received = productionService.crackReceivedBetween(start, end);
         double[] none = new double[]{0, 0};
+        Map<LocalDate, double[]> stockByDay = productionService.crackStockByDay(start, end);
+        double[] noStock = new double[]{0, 0, 0, 0};
         List<Map<String, Object>> rows = ReportPeriods.daysBetween(start, end).stream()
-                .map(date -> reportRow(ReportPeriods.dayLabel(date), salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), received.getOrDefault(date, none)))
+                .map(date -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.dayLabel(date), salesByDate.getOrDefault(date, List.of()), giftsByDate.getOrDefault(date, List.of()), received.getOrDefault(date, none));
+                    putStock(row, stockByDay.getOrDefault(date, noStock));
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
@@ -504,8 +521,13 @@ public class CrackEggService {
             m[1] += v[1];
         });
         double[] none = new double[]{0, 0};
+        Map<LocalDate, double[]> stockByDay = productionService.crackStockByDay(monthsList.get(0).atDay(1), monthsList.get(monthsList.size() - 1).atEndOfMonth());
         List<Map<String, Object>> rows = monthsList.stream()
-                .map(month -> reportRow(ReportPeriods.monthLabel(month), salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()), receivedByMonth.getOrDefault(month, none)))
+                .map(month -> {
+                    Map<String, Object> row = reportRow(ReportPeriods.monthLabel(month), salesByMonth.getOrDefault(month, List.of()), giftsByMonth.getOrDefault(month, List.of()), receivedByMonth.getOrDefault(month, none));
+                    putStock(row, ProductionService.monthEnds(stockByDay, month, 4, 0, 2));
+                    return row;
+                })
                 .toList();
         return new ReportTableResponse(REPORT_COLUMNS, rows);
     }
