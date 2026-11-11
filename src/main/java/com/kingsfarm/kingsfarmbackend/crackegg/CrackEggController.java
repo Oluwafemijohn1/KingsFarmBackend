@@ -137,9 +137,9 @@ public class CrackEggController {
         return GiftLogEntryResponse.from(entry, service.isEditable(entry.getOccurredAt()));
     }
 
-    /** Administrator: move a gift saved on the wrong day to the right one (switched by TRANSACTION_DELETE_ENABLED). */
+    /** Administrator or Crack Egg Manager: move a gift saved on the wrong day to the right one (only while TRANSACTION_DELETE_ENABLED is on). */
     @PatchMapping("/gift/log/{id}/date")
-    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'CRACK_EGG_MANAGER')")
     public GiftLogEntryResponse moveGiftDate(@PathVariable Long id, @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         CrackEggGiftLogEntry entry = service.moveGiftDate(id, date);
         return GiftLogEntryResponse.from(entry, service.isEditable(entry.getOccurredAt()));
