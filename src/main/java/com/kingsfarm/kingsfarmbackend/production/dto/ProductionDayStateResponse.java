@@ -19,6 +19,7 @@ public record ProductionDayStateResponse(
         double crackGoodSalesAuto,
         double crackGoodClosing,
         double crackRoughClosing,
+        double crackRoughFeedMill,
         String enteredBy,
         String updatedBy,
         boolean editable

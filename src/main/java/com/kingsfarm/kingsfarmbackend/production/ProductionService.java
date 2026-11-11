@@ -363,7 +363,7 @@ public class ProductionService {
         return new ProductionDayStateResponse(r.entryDate(), r.categories(), r.crackGoodOpen(), r.crackRoughOpen(),
                 r.crackGoodProd(), r.crackRoughProd(), r.goodClassify(), r.roughClassify(), r.totalCrackFromWhole(),
                 r.classifyTotal(), r.classifyMismatch(), r.crackGoodGiftAuto(), r.crackGoodSalesAuto(),
-                r.crackGoodClosing(), r.crackRoughClosing(), r.enteredBy(), r.updatedBy(),
+                r.crackGoodClosing(), r.crackRoughClosing(), r.crackRoughFeedMill(), r.enteredBy(), r.updatedBy(),
                 editWindow.isOpen(Mod.CRACK_EGG, r.entryDate()));
     }
 
@@ -639,17 +639,21 @@ public class ProductionService {
         // Crack Manager classifies ONLY the Whole Egg crack use; Production classifies its own crack (crackGoodProd/crackRoughProd).
         boolean mismatch = Math.abs(classifyTotal - totalCrackFromWhole) > 0.01;
 
-        double giftAuto = crackEggGoodGift();
-        double salesAuto = crackEggGoodSales();
+        // Gift, sales and Feed Mill usage come from the Crack Egg module's own figures FOR THIS DAY, so
+        // Production and Crack Egg always show the same opening and closing for the same day.
+        var crackStock = crackEggService.stockSummary(date);
+        double giftAuto = crackStock.gcGiftQty();
+        double salesAuto = crackStock.gcTotalSales();
+        double roughFeedMill = crackStock.rcFeedMill();
         double crackGoodClosing = state.getCrackGoodOpen() + state.getCrackGoodProd() + state.getGoodClassify() - giftAuto - salesAuto;
-        double crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify();
+        double crackRoughClosing = state.getCrackRoughOpen() + state.getCrackRoughProd() + state.getRoughClassify() - roughFeedMill;
 
         return new ProductionDayStateResponse(
                 date, rows,
                 state.getCrackGoodOpen(), state.getCrackRoughOpen(), state.getCrackGoodProd(), state.getCrackRoughProd(),
                 state.getGoodClassify(), state.getRoughClassify(),
                 totalCrackFromWhole, classifyTotal, mismatch,
-                giftAuto, salesAuto, crackGoodClosing, crackRoughClosing,
+                giftAuto, salesAuto, crackGoodClosing, crackRoughClosing, roughFeedMill,
                 state.getEnteredBy(), state.getUpdatedBy(), isEditable(date)
         );
     }
