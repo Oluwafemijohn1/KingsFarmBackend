@@ -321,9 +321,17 @@ public class WholeEggService {
         }
         Map<CatKey, Double> price = categoryMap(WeCategoryValueKind.PRICE);
         List<StockRowResponse> rows = new ArrayList<>();
+        // A finished day keeps crack use and gifts as one combined figure; the history table says how much of it was gift.
+        Map<CatKey, Double> giftSaved = new EnumMap<>(CatKey.class);
+        for (WeAdjustmentLog a : adjustmentLog.findAllByDayBetweenOrderByDayDescOccurredAtDesc(date, date)) {
+            if (a.getKind() == WeAdjustmentLog.Kind.GIFT) {
+                giftSaved.merge(a.getCategory(), a.getQty(), Double::sum);
+            }
+        }
         for (com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow r : productionService.categoryRowsFor(date)) {
-            // Crack use and gifts for a finished day are only kept as a combined figure, shown under Crack Use.
-            rows.add(new StockRowResponse(r.category(), r.opening(), r.production(), r.totalSales(), r.crackUse(), 0,
+            double combined = r.crackUse() + r.gift();
+            double gift = Math.min(Math.max(giftSaved.getOrDefault(r.category(), 0.0), 0), Math.max(combined, 0));
+            rows.add(new StockRowResponse(r.category(), r.opening(), r.production(), r.totalSales(), combined - gift, gift,
                     r.closing(), price.get(r.category()).longValue(), lockService.isLocked(Mod.WHOLE_EGG, r.category().wire())));
         }
         return rows;
