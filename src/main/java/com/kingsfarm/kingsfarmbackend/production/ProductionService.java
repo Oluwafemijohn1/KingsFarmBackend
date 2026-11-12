@@ -747,6 +747,19 @@ public class ProductionService {
         return map;
     }
 
+    /** Per day in a range: every size's opening, production, sales, crack/gift and closing, oldest day first. */
+    @Transactional(readOnly = true)
+    public Map<LocalDate, List<CategoryStockRow>> categoryRowsByDay(LocalDate start, LocalDate end) {
+        List<ProductionDayState> states = new java.util.ArrayList<>(dayStateRepository.findAllByEntryDateGreaterThan(start.minusDays(1)));
+        states.sort(java.util.Comparator.comparing(ProductionDayState::getEntryDate));
+        Map<LocalDate, List<CategoryStockRow>> map = new java.util.LinkedHashMap<>();
+        for (ProductionDayState s : states) {
+            if (s.getEntryDate().isAfter(end)) continue;
+            map.put(s.getEntryDate(), toResponse(s).categories());
+        }
+        return map;
+    }
+
     /** Per day in a range: [Good opening, Good closing, Rough opening, Rough closing]; a finished day closes at the next day's opening. */
     @Transactional(readOnly = true)
     public Map<LocalDate, double[]> crackStockByDay(LocalDate start, LocalDate end) {
