@@ -59,14 +59,28 @@ public class WholeEggController {
 
     @PutMapping("/stock/sales-crack")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
-    public void commitSalesCrack(@Valid @RequestBody CommitCategoryQtyRequest request) {
-        service.commitSalesCrack(request);
+    public void commitSalesCrack(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody CommitCategoryQtyRequest request) {
+        service.commitSalesCrack(request, principal.username());
     }
 
     @PutMapping("/stock/gift")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
-    public void commitGift(@Valid @RequestBody CommitCategoryQtyRequest request) {
-        service.commitGift(request);
+    public void commitGift(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody CommitCategoryQtyRequest request) {
+        service.commitGift(request, principal.username());
+    }
+
+    // ── Gift / crack history and daily stock ─────────────────────────────
+
+    @GetMapping("/adjustments")
+    public List<AdjustmentLogResponse> adjustments(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                                   @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.adjustments(from, to);
+    }
+
+    @GetMapping("/daily-stock")
+    public List<DailyStockResponse> dailyStock(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                               @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.dailyStock(from, to);
     }
 
     // ── Customers ─────────────────────────────────────────────────────────
@@ -121,8 +135,8 @@ public class WholeEggController {
 
     @PostMapping("/past-adjustments")
     @PreAuthorize("hasRole('WHOLE_EGG_MANAGER')")
-    public void recordPastAdjustment(@Valid @RequestBody PastAdjustmentRequest request) {
-        service.recordPastAdjustment(request);
+    public void recordPastAdjustment(@AuthenticationPrincipal AuthenticatedPrincipal principal, @Valid @RequestBody PastAdjustmentRequest request) {
+        service.recordPastAdjustment(request, principal.username());
     }
 
     @PostMapping("/past-adjustments/clear")

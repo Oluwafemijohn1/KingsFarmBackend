@@ -200,20 +200,56 @@ public class WholeEggService {
         setCategoryValue(WeCategoryValueKind.PRICE, request.category(), request.value());
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private WeAdjustmentLogRepository adjustmentLog;
+
+    private void logAdjustment(LocalDate day, WeAdjustmentLog.Kind kind, CatKey category, double qty, String username) {
+        if (Math.abs(qty) < 1e-9) {
+            return;
+        }
+        adjustmentLog.save(WeAdjustmentLog.builder().day(day).kind(kind).category(category).qty(qty).enteredBy(username).build());
+    }
+
     @Audited(module = Mod.WHOLE_EGG, action = "Commit Sales Crack")
     @Transactional
-    public void commitSalesCrack(CommitCategoryQtyRequest request) {
+    public void commitSalesCrack(CommitCategoryQtyRequest request, String username) {
         for (CategoryQtyEntry entry : request.values()) {
+            // Today's figure is overwritten, so the history keeps what this save added to (or took from) it.
+            double before = categoryValue(WeCategoryValueKind.SALES_CRACK, entry.category());
             setCategoryValue(WeCategoryValueKind.SALES_CRACK, entry.category(), entry.qty());
+            logAdjustment(LocalDate.now(), WeAdjustmentLog.Kind.CRACK, entry.category(), entry.qty() - before, username);
         }
     }
 
     @Audited(module = Mod.WHOLE_EGG, action = "Commit Gift")
     @Transactional
-    public void commitGift(CommitCategoryQtyRequest request) {
+    public void commitGift(CommitCategoryQtyRequest request, String username) {
         for (CategoryQtyEntry entry : request.values()) {
+            double before = categoryValue(WeCategoryValueKind.GIFT, entry.category());
             setCategoryValue(WeCategoryValueKind.GIFT, entry.category(), entry.qty());
+            logAdjustment(LocalDate.now(), WeAdjustmentLog.Kind.GIFT, entry.category(), entry.qty() - before, username);
         }
+    }
+
+    /** Gift / sales-crack history for a range of days, newest first. */
+    @Transactional(readOnly = true)
+    public List<AdjustmentLogResponse> adjustments(LocalDate from, LocalDate to) {
+        LocalDate end = to == null ? LocalDate.now() : to;
+        LocalDate start = from == null ? end.minusDays(30) : from;
+        return adjustmentLog.findAllByDayBetweenOrderByDayDescOccurredAtDesc(start, end).stream()
+                .map(a -> new AdjustmentLogResponse(a.getId(), a.getDay(), a.getKind().name(), a.getCategory(), a.getQty(), a.getEnteredBy(), a.getOccurredAt()))
+                .toList();
+    }
+
+    /** Opening and closing stock for every size on every day in a range. */
+    @Transactional(readOnly = true)
+    public List<DailyStockResponse> dailyStock(LocalDate from, LocalDate to) {
+        LocalDate end = to == null ? LocalDate.now() : to;
+        LocalDate start = from == null ? end.minusDays(30) : from;
+        List<DailyStockResponse> out = new ArrayList<>();
+        productionService.categoryRowsByDay(start, end).forEach((day, rows) -> out.add(new DailyStockResponse(day,
+                rows.stream().map(r -> new DailyStockResponse.Line(r.category(), r.opening(), r.production(), r.totalSales(), r.crackUse() + r.gift(), r.closing())).toList())));
+        return out;
     }
 
     // ── Stock Overview ───────────────────────────────────────────────────────
@@ -465,7 +501,7 @@ public class WholeEggService {
     @Audited(module = Mod.WHOLE_EGG, action = "Record Past-day Crack/Gift", type = LogType.AUDIT,
             detail = "#request.kind() + ' for ' + #request.date()")
     @Transactional
-    public void recordPastAdjustment(PastAdjustmentRequest request) {
+    public void recordPastAdjustment(PastAdjustmentRequest request, String username) {
         LocalDate day = resolveEntryDay(request.date());
         if (day.isEqual(LocalDate.now())) {
             throw new BadRequestException("For today, use the normal Commit button.");
@@ -475,6 +511,7 @@ public class WholeEggService {
             // A negative quantity takes away something entered by mistake (e.g. a crack figure saved twice).
             if (e.qty() == 0) continue;
             productionService.carryDeltaForward(day, e.category(), -e.qty());
+            logAdjustment(day, request.kind() == PastAdjustmentRequest.Kind.GIFT ? WeAdjustmentLog.Kind.GIFT : WeAdjustmentLog.Kind.CRACK, e.category(), e.qty(), username);
             crackTotal += e.qty();
         }
         if (request.kind() == PastAdjustmentRequest.Kind.CRACK && crackTotal != 0) {
@@ -720,6 +757,8 @@ public class WholeEggService {
         for (com.kingsfarm.kingsfarmbackend.production.dto.CategoryStockRow r : productionService.categoryRowsFor(day)) {
             if (r.crackUse() > 0) {
                 productionService.carryDeltaForward(day, r.category(), r.crackUse());
+                // Keep the history honest: a matching minus line shows the figure was taken back.
+                logAdjustment(day, WeAdjustmentLog.Kind.CRACK, r.category(), -r.crackUse(), "administrator");
             }
         }
         productionService.clearCrackSnapshot(day);
