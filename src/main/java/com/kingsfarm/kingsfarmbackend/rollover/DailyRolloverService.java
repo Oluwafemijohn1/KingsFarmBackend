@@ -68,6 +68,19 @@ public class DailyRolloverService {
     @EventListener(ApplicationReadyEvent.class)
     public void onStartup() {
         ensureRolled();
+        reconcileOpenings();
+    }
+
+    /** Keeps Whole Egg's live opening identical to Production's row for today; logs anything it had to correct. */
+    private void reconcileOpenings() {
+        try {
+            java.util.List<String> changes = productionService.reconcileTodayOpenings();
+            if (!changes.isEmpty()) {
+                log.warn("Whole Egg opening stock was out of step with Production and has been corrected: {}", changes);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Opening stock check failed", e);
+        }
     }
 
     /** Cheap no-op after the first successful call each day. */
@@ -120,6 +133,7 @@ public class DailyRolloverService {
             state.setLastDate(today);
             stateRepository.save(state);
         });
+        reconcileOpenings();
         try {
             dayClosureService.autoCloseFinishedDay(prev);
         } catch (RuntimeException e) {
