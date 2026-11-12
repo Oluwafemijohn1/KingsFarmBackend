@@ -36,6 +36,9 @@ public class SystemResetService {
     private final WeCategoryValueRepository weCategoryValues;
     private final CustomerRepository customers;
     private final CrackEggGiftLogRepository crackGiftLog;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.wholeegg.WeAdjustmentLogRepository weAdjustmentLog;
     private final GcSaleTransactionRepository gcSales;
     private final CrackEggStateRepository crackState;
     private final MortPenEntryRepository mortPenEntries;
@@ -186,6 +189,7 @@ public class SystemResetService {
                 d.setCrackFromWholeSnapshot(null);
                 productionDayStates.save(d);
             });
+            weAdjustmentLog.deleteAllInBatch();
             gcSales.deleteAllInBatch();
             crackGiftLog.deleteAllInBatch();
             crackState.findAll().forEach(c -> {
@@ -200,6 +204,7 @@ public class SystemResetService {
         }
 
         if (wholeEgg) {
+            weAdjustmentLog.deleteAllInBatch();
             weLineItems.deleteAllInBatch();
             weTransactions.deleteAllInBatch();
             weCategoryValues.deleteAllInBatch();

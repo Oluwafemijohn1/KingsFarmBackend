@@ -25,7 +25,8 @@ import java.time.LocalDate;
 @Builder
 public class WeAdjustmentLog {
 
-    public enum Kind { GIFT, CRACK }
+    /** COMBINED = crack use and gifts together, rebuilt from the stock figures for days saved before this history existed. */
+    public enum Kind { GIFT, CRACK, COMBINED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
