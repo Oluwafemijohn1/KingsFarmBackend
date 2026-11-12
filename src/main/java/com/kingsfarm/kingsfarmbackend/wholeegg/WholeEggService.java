@@ -231,6 +231,36 @@ public class WholeEggService {
         }
     }
 
+    /**
+     * Once, at start-up: for every finished day with no history lines, adds one reconstructed line per size holding
+     * that day's crack use and gifts together (opening + production - sales - closing). The split between gift and crack,
+     * and who saved it, were never stored for those days, so the line says so. Runs only while no reconstructed line exists.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @Transactional
+    public void reconstructHistory() {
+        try {
+            if (adjustmentLog.existsByEnteredBy("reconstructed")) {
+                return;
+            }
+            LocalDate today = LocalDate.now();
+            Set<LocalDate> daysWithLines = adjustmentLog.findAll().stream().map(WeAdjustmentLog::getDay).collect(Collectors.toSet());
+            productionService.categoryRowsByDay(LocalDate.of(2000, 1, 1), today.minusDays(1)).forEach((day, rows) -> {
+                if (daysWithLines.contains(day)) {
+                    return;
+                }
+                for (var r : rows) {
+                    double combined = r.crackUse() + r.gift();
+                    if (combined > 1e-9) {
+                        logAdjustment(day, WeAdjustmentLog.Kind.COMBINED, r.category(), combined, "reconstructed");
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            // history is a convenience; never block start-up
+        }
+    }
+
     /** Gift / sales-crack history for a range of days, newest first. */
     @Transactional(readOnly = true)
     public List<AdjustmentLogResponse> adjustments(LocalDate from, LocalDate to) {
