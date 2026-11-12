@@ -166,6 +166,20 @@ public class WholeEggService {
             return;
         }
         setCategoryValue(WeCategoryValueKind.OPENING, request.category(), request.value());
+        // Production's row for today holds the same opening - keep the two identical.
+        productionService.setTodayRowOpening(request.category(), request.value());
+    }
+
+    /** The live (today's) opening for a category. */
+    @Transactional(readOnly = true)
+    public double liveOpening(CatKey category) {
+        return categoryValue(WeCategoryValueKind.OPENING, category);
+    }
+
+    /** System sync (ignores the opening-stock lock): sets the live opening exactly. */
+    @Transactional
+    public void setLiveOpening(CatKey category, double value) {
+        setCategoryValue(WeCategoryValueKind.OPENING, category, value);
     }
 
     /** System adjustment (not a manager edit, so it ignores the opening-stock lock): shifts the live opening by a recalculation delta. */

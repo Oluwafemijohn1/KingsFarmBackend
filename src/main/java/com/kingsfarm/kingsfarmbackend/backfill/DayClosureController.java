@@ -37,7 +37,13 @@ public class DayClosureController {
         return service.missingFor(module, date);
     }
 
-    /** Feed Mill only: go back to an earlier day (reopens it and every later day). */
+    /** Whether managers of every module may go back to an earlier day (Feed Mill always can). */
+    @GetMapping("/go-back-enabled")
+    public java.util.Map<String, Boolean> goBackEnabled() {
+        return java.util.Map.of("enabled", service.goBackEnabled());
+    }
+
+    /** Go back to an earlier day (reopens it and every later day). Feed Mill always; other modules while the switch is on. */
     @PostMapping("/reopen")
     public DayStatusResponse reopen(@AuthenticationPrincipal AuthenticatedPrincipal principal, @RequestParam Mod module,
                                     @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate from) {

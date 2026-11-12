@@ -42,6 +42,14 @@ public class DayClosureService {
 
     private final DayCompletenessService completeness;
 
+    @Value("${app.transactions.delete-enabled:false}")
+    private boolean goBackEnabled;
+
+    /** Whether managers of every module may go back to an earlier day (same switch as the Change day / delete tools). */
+    public boolean goBackEnabled() {
+        return goBackEnabled;
+    }
+
     public DayClosureService(DayClosureRepository repository,
                              DayCompletenessService completeness,
                              @Value("${app.golive.start-date:2026-11-01}") String startDate) {
@@ -126,13 +134,18 @@ public class DayClosureService {
     @Audited(module = Mod.ADMIN, action = "Reopen Days", detail = "#module + ' from ' + #from")
     @Transactional
     public DayStatusResponse reopenFrom(Mod module, LocalDate from, AuthenticatedPrincipal principal) {
-        if (module != Mod.FEED_MILL) {
-            throw new BadRequestException("Going back to earlier days is only available for the Feed Mill.");
+        // Feed Mill has always been allowed; every other module only while the switch (TRANSACTION_DELETE_ENABLED) is on.
+        if (module != Mod.FEED_MILL && !goBackEnabled) {
+            throw new BadRequestException("Going back to earlier days is switched off. Ask the Administrator for permission instead (\"Missed a day?\").");
         }
-        boolean allowed = principal.role() == Role.ADMINISTRATOR || principal.role() == Role.FEED_MILL_MANAGER
-                || (principal.extraRoles() != null && principal.extraRoles().contains(Role.FEED_MILL_MANAGER));
+        Role owner = OWNER.get(module);
+        if (owner == null) {
+            throw new BadRequestException("Days are not closed for this module.");
+        }
+        boolean allowed = principal.role() == Role.ADMINISTRATOR || principal.role() == owner
+                || (principal.extraRoles() != null && principal.extraRoles().contains(owner));
         if (!allowed) {
-            throw new ForbiddenException("Only the Feed Mill Manager or the Administrator can go back to an earlier day.");
+            throw new ForbiddenException("Only the " + owner.label() + " or the Administrator can go back to an earlier day.");
         }
         if (from.isBefore(startDate) || from.isAfter(LocalDate.now())) {
             throw new BadRequestException("Pick a day between " + startDate + " and today.");

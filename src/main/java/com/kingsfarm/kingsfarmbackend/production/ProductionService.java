@@ -346,8 +346,44 @@ public class ProductionService {
         if (saved.getEntryDate().isBefore(LocalDate.now())) {
             // That day's closing moved by the same amount, so every later day's opening (and Whole Egg's live opening) follows.
             carryDeltaForward(saved.getEntryDate(), request.category(), request.value() - before);
+        } else {
+            // Today's opening also lives in Whole Egg - keep the two identical.
+            wholeEggService.setLiveOpening(request.category(), request.value());
         }
         return saved;
+    }
+
+    /** Sets today's Production row opening for a category (used when Whole Egg's opening is edited). */
+    @Transactional
+    public void setTodayRowOpening(CatKey category, double value) {
+        ProductionDayState row = dayStateRepository.findByEntryDate(LocalDate.now()).orElse(null);
+        if (row == null) {
+            return;
+        }
+        row.setCatOpening(category, value);
+        dayStateRepository.save(row);
+    }
+
+    /**
+     * Today's opening is kept in two places (Production's row and Whole Egg's live figure). This makes the live
+     * figure equal Production's row, which is built from the finished days' own records, and reports what it changed.
+     */
+    @Transactional
+    public List<String> reconcileTodayOpenings() {
+        List<String> changes = new java.util.ArrayList<>();
+        ProductionDayState row = dayStateRepository.findByEntryDate(LocalDate.now()).orElse(null);
+        if (row == null) {
+            return changes;
+        }
+        for (CatKey k : CatKey.values()) {
+            double live = wholeEggService.liveOpening(k);
+            double expected = row.catOpening(k);
+            if (Math.abs(live - expected) > 1e-9) {
+                changes.add(k.wire() + ": was " + live + ", now " + expected);
+                wholeEggService.setLiveOpening(k, expected);
+            }
+        }
+        return changes;
     }
 
     /** Same lookup as the day picker's view. */
