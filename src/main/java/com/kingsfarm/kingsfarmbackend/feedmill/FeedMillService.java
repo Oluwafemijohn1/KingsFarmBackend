@@ -559,6 +559,38 @@ public class FeedMillService {
         return productionRepository.save(entry);
     }
 
+    @org.springframework.beans.factory.annotation.Value("${app.transactions.delete-enabled:false}")
+    private boolean transactionChangeEnabled;
+
+    /** Whether the "Change day" tool is switched on (TRANSACTION_DELETE_ENABLED), so the owner can turn it off after handover. */
+    public boolean transactionChangeEnabled() {
+        return transactionChangeEnabled;
+    }
+
+    /**
+     * Moves a production run that was entered on the wrong finished day to the right finished day.
+     * Ingredient and fish-feed stock only keep a running figure and a finished day's use is already folded into
+     * the opening, so moving a run between two finished days changes its date only - stock stays as it is.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Move Production Run", type = LogType.AUDIT, detail = "'Run #' + #id + ' to ' + #newDay")
+    @Transactional
+    public FeedProductionLogEntry moveProductionDate(Long id, LocalDate newDay) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Changing the day of a run is switched off.");
+        }
+        FeedProductionLogEntry entry = productionRepository.findById(id).orElseThrow(() -> new NotFoundException("Production run not found."));
+        LocalDate today = LocalDate.now();
+        LocalDate oldDay = entry.getOccurredAt().atZone(ZONE).toLocalDate();
+        if (newDay == null || !newDay.isBefore(today)) {
+            throw new BadRequestException("Choose an earlier day (before today).");
+        }
+        if (!oldDay.isBefore(today)) {
+            throw new BadRequestException("This run is from today - edit it directly instead.");
+        }
+        entry.setOccurredAt(middayOf(newDay));
+        return productionRepository.save(entry);
+    }
+
     public boolean isEditable(Instant occurredAt) {
         return editWindow.isOpen(Mod.FEED_MILL, occurredAt.atZone(ZONE).toLocalDate());
     }
