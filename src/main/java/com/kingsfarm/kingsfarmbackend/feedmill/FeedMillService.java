@@ -705,24 +705,71 @@ public class FeedMillService {
         }
     }
 
-    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Added Stock", type = LogType.AUDIT, detail = "'Resynced Added from today\'s production runs'")
+    /**
+     * Rebuilds the fish feed cards from the records, with Closing = Opening + Added - Collected:
+     * today's Added and Collected come from today's production runs and collections, and today's Opening is
+     * everything produced on earlier days minus everything collected on earlier days (starting from nothing).
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Recalculate Fish Feed Stock", type = LogType.AUDIT, detail = "'Rebuilt opening, added and collected from the production and collection records'")
     @Transactional
     public void recalculateFishFeedAdded() {
-        Map<String, Double> totalsKg = new LinkedHashMap<>();
-        for (String type : FISH_FEED_TYPES) totalsKg.put(type, 0.0);
+        Map<String, double[]> kg = new LinkedHashMap<>(); // [producedBefore, collectedBefore, addedToday, collectedToday]
+        for (String type : FISH_FEED_TYPES) kg.put(type, new double[4]);
         java.time.Instant dayStart = com.kingsfarm.kingsfarmbackend.common.AppDay.start(java.time.LocalDate.now());
         for (FeedProductionLogEntry entry : productionRepository.findAll()) {
-            if (entry.getOccurredAt().isBefore(dayStart)) continue;
             String canonical = canonicalFishType(entry.getFeedType().getName());
-            if (canonical != null) {
-                totalsKg.merge(canonical, entry.getQtyTons() * 1000, Double::sum);
-            }
+            if (canonical == null) continue;
+            kg.get(canonical)[entry.getOccurredAt().isBefore(dayStart) ? 0 : 2] += entry.getQtyTons() * 1000;
         }
-        for (Map.Entry<String, Double> e : totalsKg.entrySet()) {
+        for (FeedCollectionLogEntry c : collectionRepository.findAll()) {
+            int slot = c.getOccurredAt().isBefore(dayStart) ? 1 : 3;
+            kg.get("Fish Starter")[slot] += c.getFishStarterKg();
+            kg.get("Fish Grower")[slot] += c.getFishGrowerKg();
+            kg.get("Fish Finisher")[slot] += c.getFishFinisherKg();
+        }
+        for (Map.Entry<String, double[]> e : kg.entrySet()) {
             FishFeedStock stock = fishFeedStock(e.getKey());
-            stock.setAdded(e.getValue());
+            double[] v = e.getValue();
+            stock.setOpening(v[0] - v[1]);
+            stock.setAdded(v[2]);
+            stock.setCollected(v[3]);
             fishFeedStockRepository.save(stock);
         }
+    }
+
+    /**
+     * Administrator / Feed Mill Manager (switched by TRANSACTION_DELETE_ENABLED): deletes a production run that was
+     * entered by mistake and puts its ingredients and fish feed back.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Delete Production Run", type = LogType.AUDIT, detail = "'Run #' + #id")
+    @Transactional
+    public void deleteProductionRun(Long id) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Deleting a run is switched off.");
+        }
+        FeedProductionLogEntry entry = productionRepository.findById(id).orElseThrow(() -> new NotFoundException("Production run not found."));
+        boolean past = entry.getOccurredAt().atZone(ZONE).toLocalDate().isBefore(LocalDate.now());
+        double qty = entry.getQtyTons();
+        for (FeedFormulationEntry e : formulationRepository.findAllByFeedType(entry.getFeedType())) {
+            double use = round1(e.getQtyPerTon() * qty);
+            if (past) {
+                carryIngredientUse(e.getIngredient(), -use);
+            } else {
+                e.getIngredient().setUsed(e.getIngredient().getUsed() - use);
+                ingredientRepository.save(e.getIngredient());
+            }
+        }
+        String fish = canonicalFishType(entry.getFeedType().getName());
+        if (fish != null) {
+            if (past) {
+                carryFishFeed(fish, -qty * 1000, 0);
+            } else {
+                FishFeedStock stock = fishFeedStock(fish);
+                stock.setAdded(stock.getAdded() - qty * 1000);
+                fishFeedStockRepository.save(stock);
+            }
+        }
+        productionRepository.delete(entry);
     }
 
     @Audited(module = Mod.FEED_MILL, action = "Update Opening Stock", detail = "'Fish Feed ' + #type + ' -> ' + #request.value()")

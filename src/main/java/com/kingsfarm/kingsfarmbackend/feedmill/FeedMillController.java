@@ -158,6 +158,13 @@ public class FeedMillController {
         return ProductionLogResponse.from(entry, service.isEditable(entry.getOccurredAt()));
     }
 
+    /** Delete a run entered by mistake and put its ingredients and fish feed back (only while TRANSACTION_DELETE_ENABLED is on). */
+    @DeleteMapping("/production/{id}")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'FEED_MILL_MANAGER')")
+    public void deleteProductionRun(@PathVariable Long id) {
+        service.deleteProductionRun(id);
+    }
+
     @GetMapping("/production/change-enabled")
     public java.util.Map<String, Boolean> productionChangeEnabled() {
         return java.util.Map.of("enabled", service.transactionChangeEnabled());
