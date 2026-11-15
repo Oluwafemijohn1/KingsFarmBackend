@@ -149,6 +149,20 @@ public class FeedMillController {
         return ProductionLogResponse.from(entry, service.isEditable(entry.getOccurredAt()));
     }
 
+    /** Move a run entered on the wrong finished day (only while TRANSACTION_DELETE_ENABLED is on). */
+    @PatchMapping("/production/{id}/date")
+    @PreAuthorize("hasAnyRole('ADMINISTRATOR', 'FEED_MILL_MANAGER')")
+    public ProductionLogResponse moveProductionDate(@PathVariable Long id,
+                                                    @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        FeedProductionLogEntry entry = service.moveProductionDate(id, date);
+        return ProductionLogResponse.from(entry, service.isEditable(entry.getOccurredAt()));
+    }
+
+    @GetMapping("/production/change-enabled")
+    public java.util.Map<String, Boolean> productionChangeEnabled() {
+        return java.util.Map.of("enabled", service.transactionChangeEnabled());
+    }
+
     @GetMapping("/production")
     public PageResponse<ProductionLogResponse> productionHistory(@PageableDefault(size = 20) Pageable pageable) {
         return PageResponse.from(service.productionHistory(pageable));
