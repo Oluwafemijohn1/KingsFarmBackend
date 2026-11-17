@@ -382,6 +382,17 @@ public class CrackEggService {
         return saleRepository.findAllByOrderByOccurredAtDesc(pageable);
     }
 
+    /** Sales history for a range of days ({@code from} and/or {@code to}, both inclusive; either may be blank). */
+    @Transactional(readOnly = true)
+    public Page<GcSaleTransaction> saleHistory(LocalDate from, LocalDate to, Pageable pageable) {
+        if (from == null && to == null) {
+            return saleRepository.findAllByOrderByOccurredAtDesc(pageable);
+        }
+        Instant start = from == null ? Instant.EPOCH : com.kingsfarm.kingsfarmbackend.common.AppDay.start(from);
+        Instant end = to == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(to);
+        return saleRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(start, end, pageable);
+    }
+
     // ── Gift log ──────────────────────────────────────────────────────────
 
     /** Snapshots the CURRENT gcGiftQty/recipient/authorizer into a permanent log row — matches the frontend's saveGift(), which reads live state rather than taking new values as input. */

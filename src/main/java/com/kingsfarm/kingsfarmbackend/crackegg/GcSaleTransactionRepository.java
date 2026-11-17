@@ -12,6 +12,9 @@ public interface GcSaleTransactionRepository extends JpaRepository<GcSaleTransac
     Page<GcSaleTransaction> findAllByOrderByOccurredAtDesc(Pageable pageable);
     List<GcSaleTransaction> findAllByOrderByOccurredAtDesc();
 
+    /** Sales inside a half-open instant range, newest first - backs the date-range filter on Sales Transactions. */
+    Page<GcSaleTransaction> findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(Instant start, Instant end, Pageable pageable);
+
     @Query("select coalesce(sum(t.qty), 0) from GcSaleTransaction t")
     double sumQty();
 

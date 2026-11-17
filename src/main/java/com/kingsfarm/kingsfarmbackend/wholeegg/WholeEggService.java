@@ -892,10 +892,12 @@ public class WholeEggService {
     }
 
     @Transactional(readOnly = true)
-    public Page<WeSaleTransaction> allTransactions(boolean isAdmin, String bank, LocalDate date, Pageable pageable) {
+    public Page<WeSaleTransaction> allTransactions(boolean isAdmin, String bank, LocalDate date, LocalDate to, Pageable pageable) {
         int minYear = isAdmin ? 0 : LocalDate.now().getYear();
+        // {@code date} is the first day of the range and {@code to} the last (inclusive).
+        LocalDate last = to != null ? to : date;
         Instant start = date == null ? Instant.EPOCH : com.kingsfarm.kingsfarmbackend.common.AppDay.start(date);
-        Instant end = date == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(date);
+        Instant end = last == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(last);
         String b = bank == null ? "" : bank.trim();
         if (b.equalsIgnoreCase("cash")) {
             return transactionRepository.findFilteredByMethod(minYear, PaymentMethod.CASH, start, end, pageable);

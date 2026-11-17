@@ -95,8 +95,10 @@ public class CrackEggController {
     }
 
     @GetMapping("/sales")
-    public PageResponse<GcSaleResponse> saleHistory(@PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.saleHistory(pageable)
+    public PageResponse<GcSaleResponse> saleHistory(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                                    @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+                                                    @PageableDefault(size = 20) Pageable pageable) {
+        return PageResponse.from(service.saleHistory(from, to, pageable)
                 .map(t -> GcSaleResponse.from(t, service.isEditable(t.getOccurredAt()))));
     }
 

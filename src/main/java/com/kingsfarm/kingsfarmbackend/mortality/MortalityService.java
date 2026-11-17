@@ -548,9 +548,11 @@ public class MortalityService {
 
     /** Sales history filtered by payment ("Cash" or a bank name; blank = all) and/or one day. */
     @Transactional(readOnly = true)
-    public Page<MortSaleEntry> saleHistory(String payment, LocalDate date, Pageable pageable) {
+    public Page<MortSaleEntry> saleHistory(String payment, LocalDate date, LocalDate to, Pageable pageable) {
+        // {@code date} is the first day of the range and {@code to} the last (inclusive); with only one given it is that single day onward / up to.
+        LocalDate last = to != null ? to : date;
         Instant start = date == null ? Instant.EPOCH : com.kingsfarm.kingsfarmbackend.common.AppDay.start(date);
-        Instant end = date == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(date);
+        Instant end = last == null ? Instant.parse("9999-01-01T00:00:00Z") : com.kingsfarm.kingsfarmbackend.common.AppDay.end(last);
         String p = payment == null ? "" : payment.trim();
         if (p.equalsIgnoreCase("cash")) {
             return saleRepository.findFilteredByMethod(com.kingsfarm.kingsfarmbackend.common.PaymentMethod.CASH, start, end, pageable);
