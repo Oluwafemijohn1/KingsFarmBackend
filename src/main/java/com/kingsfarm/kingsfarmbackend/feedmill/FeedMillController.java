@@ -189,10 +189,8 @@ public class FeedMillController {
     // ── Fish feed stock ───────────────────────────────────────────────────
 
     @GetMapping("/fish-feed")
-    public List<FishFeedStockResponse> listFishFeedStock() {
-        return service.listFishFeedStock().stream()
-                .map(s -> FishFeedStockResponse.from(s, service.isFishFeedOpeningLocked(s.getType())))
-                .toList();
+    public List<FishFeedStockResponse> listFishFeedStock(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.fishFeedStockOn(date);
     }
 
     @PatchMapping("/fish-feed/{type}/opening")
