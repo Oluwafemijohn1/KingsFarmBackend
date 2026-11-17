@@ -69,6 +69,12 @@ public class DailyRolloverService {
     public void onStartup() {
         ensureRolled();
         reconcileOpenings();
+        // Anything already below its minimum when the server starts is reported straight away.
+        try {
+            feedMillService.alertLowStock();
+        } catch (RuntimeException e) {
+            log.warn("Low-stock check failed", e);
+        }
     }
 
     /** Keeps Whole Egg's live opening identical to Production's row for today; logs anything it had to correct. */

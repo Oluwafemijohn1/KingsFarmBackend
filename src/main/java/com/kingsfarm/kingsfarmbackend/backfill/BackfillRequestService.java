@@ -44,6 +44,9 @@ public class BackfillRequestService {
         this.notifications = notifications;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
     @Audited(module = Mod.ADMIN, action = "Backfill Permission Requested",
             detail = "#request.module() + ' / ' + #request.forDate() + ': ' + #request.reason()")
     @Transactional
@@ -73,6 +76,9 @@ public class BackfillRequestService {
         List<String> adminEmails = userRepository.findAllByRoleAndActiveTrue(Role.ADMINISTRATOR)
                 .stream().map(User::getUsername).toList();
         notifications.backfillRequested(adminEmails, user.getFullName(), request.module().wire(), request.forDate().toString(), request.reason());
+        inApp.notifyRole(Role.ADMINISTRATOR, "REQUEST", "Missed-day permission requested",
+                user.getFullName() + " asked to enter or edit " + request.module().wire() + " records for " + request.forDate() + ". Reason: " + request.reason(),
+                "/admin/opening-stock");
         return BackfillRequestResponse.from(saved);
     }
 
@@ -119,6 +125,12 @@ public class BackfillRequestService {
         User requester = request.getRequestedBy();
         notifications.backfillResolved(requester.getUsername(), requester.getFullName(), request.getModule().wire(),
                 request.getForDate().toString(), decision == RequestStatus.APPROVED, admin.getFullName(), "/" + request.getModule().wire());
+        boolean approved = decision == RequestStatus.APPROVED;
+        inApp.notifyUser(requester.getUsername(), "REQUEST_RESULT",
+                approved ? "Missed-day permission approved" : "Missed-day permission denied",
+                "Your request to enter or edit " + request.getModule().wire() + " records for " + request.getForDate() + " was "
+                        + (approved ? "approved" : "denied") + " by " + admin.getFullName() + "." + (approved ? " It stays open for 24 hours." : ""),
+                "/" + request.getModule().wire());
         return BackfillRequestResponse.from(request);
     }
 }
