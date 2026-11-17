@@ -669,6 +669,43 @@ public class FeedMillService {
                 .orElseGet(() -> FishFeedStock.builder().type(type).build());
     }
 
+    /**
+     * Fish feed cards for the day being worked on. Today = the live figures. A finished day is worked out from the
+     * records: Opening = everything produced on earlier days minus everything collected on earlier days,
+     * Added = that day's production runs, Collected = that day's collections, Closing = Opening + Added - Collected
+     * (which is the next day's opening).
+     */
+    @Transactional(readOnly = true)
+    public List<com.kingsfarm.kingsfarmbackend.feedmill.dto.FishFeedStockResponse> fishFeedStockOn(LocalDate date) {
+        if (date == null || !date.isBefore(LocalDate.now())) {
+            return listFishFeedStock().stream()
+                    .map(s -> com.kingsfarm.kingsfarmbackend.feedmill.dto.FishFeedStockResponse.from(s, isFishFeedOpeningLocked(s.getType())))
+                    .toList();
+        }
+        Instant dayStart = com.kingsfarm.kingsfarmbackend.common.AppDay.start(date);
+        Instant dayEnd = com.kingsfarm.kingsfarmbackend.common.AppDay.start(date.plusDays(1));
+        Map<String, double[]> kg = new LinkedHashMap<>(); // [producedBefore, collectedBefore, added, collected]
+        for (String type : FISH_FEED_TYPES) kg.put(type, new double[4]);
+        for (FeedProductionLogEntry entry : productionRepository.findAll()) {
+            String canonical = canonicalFishType(entry.getFeedType().getName());
+            if (canonical == null || !entry.getOccurredAt().isBefore(dayEnd)) continue;
+            kg.get(canonical)[entry.getOccurredAt().isBefore(dayStart) ? 0 : 2] += entry.getQtyTons() * 1000;
+        }
+        for (FeedCollectionLogEntry c : collectionRepository.findAll()) {
+            if (!c.getOccurredAt().isBefore(dayEnd)) continue;
+            int slot = c.getOccurredAt().isBefore(dayStart) ? 1 : 3;
+            kg.get("Fish Starter")[slot] += c.getFishStarterKg();
+            kg.get("Fish Grower")[slot] += c.getFishGrowerKg();
+            kg.get("Fish Finisher")[slot] += c.getFishFinisherKg();
+        }
+        List<com.kingsfarm.kingsfarmbackend.feedmill.dto.FishFeedStockResponse> out = new java.util.ArrayList<>();
+        kg.forEach((type, v) -> {
+            double opening = v[0] - v[1];
+            out.add(new com.kingsfarm.kingsfarmbackend.feedmill.dto.FishFeedStockResponse(type, opening, true, v[2], v[3], opening + v[2] - v[3]));
+        });
+        return out;
+    }
+
     @Transactional(readOnly = true)
     public List<FishFeedStock> listFishFeedStock() {
         return FISH_FEED_TYPES.stream().map(this::peekFishFeedStock).toList();
@@ -808,17 +845,20 @@ public class FeedMillService {
         FishFeedStock starter = fishFeedStock("Fish Starter");
         FishFeedStock grower = fishFeedStock("Fish Grower");
         FishFeedStock finisher = fishFeedStock("Fish Finisher");
-        if (s > starter.closing()) {
-            throw new BadRequestException("Fish Starter: only " + starter.closing() + " kg available.");
-        }
-        if (g > grower.closing()) {
-            throw new BadRequestException("Fish Grower: only " + grower.closing() + " kg available.");
-        }
-        if (f > finisher.closing()) {
-            throw new BadRequestException("Fish Finisher: only " + finisher.closing() + " kg available.");
-        }
         LocalDate day = resolveEntryDay(request.date());
         boolean past = !day.isEqual(LocalDate.now());
+        // What is available is that day's own closing (not today's): opening + what was added that day - what was already collected.
+        Map<String, Double> available = new java.util.HashMap<>();
+        fishFeedStockOn(day).forEach(r -> available.put(r.type(), r.closing()));
+        if (s > available.getOrDefault("Fish Starter", 0.0)) {
+            throw new BadRequestException("Fish Starter: only " + available.getOrDefault("Fish Starter", 0.0) + " kg available" + (past ? " on " + day : "") + ".");
+        }
+        if (g > available.getOrDefault("Fish Grower", 0.0)) {
+            throw new BadRequestException("Fish Grower: only " + available.getOrDefault("Fish Grower", 0.0) + " kg available" + (past ? " on " + day : "") + ".");
+        }
+        if (f > available.getOrDefault("Fish Finisher", 0.0)) {
+            throw new BadRequestException("Fish Finisher: only " + available.getOrDefault("Fish Finisher", 0.0) + " kg available" + (past ? " on " + day : "") + ".");
+        }
         if (past) {
             // Finished day: its closing fell, so the live opening falls by the same amount.
             carryFishFeed("Fish Starter", 0, s);
