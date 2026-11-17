@@ -173,8 +173,9 @@ public class WholeEggController {
     public PageResponse<WeSaleTransactionResponse> allTransactions(@AuthenticationPrincipal AuthenticatedPrincipal principal,
                                                                      @RequestParam(required = false) String bank,
                                                                      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+                                                                     @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
                                                                      @PageableDefault(size = 20) Pageable pageable) {
-        return PageResponse.from(service.allTransactions(isAdmin(principal), bank, date, pageable).map(service::toResponse));
+        return PageResponse.from(service.allTransactions(isAdmin(principal), bank, date, to, pageable).map(service::toResponse));
     }
 
     @GetMapping("/customers/outstanding-summary")
