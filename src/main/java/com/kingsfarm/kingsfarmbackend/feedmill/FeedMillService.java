@@ -418,7 +418,23 @@ public class FeedMillService {
                 .feedType(feedType).qtyTons(request.qtyTons()).enteredBy(username)
                 .occurredAt(past ? middayOf(day) : null)
                 .build();
-        return productionRepository.save(entry);
+        FeedProductionLogEntry saved = productionRepository.save(entry);
+        alertLowStock();
+        return saved;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
+    /** Tells the Feed Mill Manager and the Administrator (and nobody else) about every ingredient that is below its minimum; not repeated while the earlier alert is still unread. */
+    public void alertLowStock() {
+        for (FeedIngredient i : ingredientRepository.findAll()) {
+            if (!i.low()) continue;
+            String message = i.getName() + " is below its minimum level - restock it before the next production run.";
+            inApp.notifyRoleOnce(com.kingsfarm.kingsfarmbackend.user.Role.FEED_MILL_MANAGER, "LOW_STOCK", "Low stock: " + i.getName(), message, "/feed-mill/ingredients");
+            inApp.notifyRoleOnce(com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR, "LOW_STOCK", "Low stock: " + i.getName(), message, "/feed-mill/ingredients");
+            inApp.notifyRoleOnce(com.kingsfarm.kingsfarmbackend.user.Role.MANAGING_DIRECTOR, "LOW_STOCK", "Low stock: " + i.getName(), message, "/feed-mill/ingredients");
+        }
     }
 
     /** The day an entry is for: null = today; future refused; a past day must be inside the grace window or approved. */
@@ -732,6 +748,11 @@ public class FeedMillService {
             i.setUsed(0);
             ingredientRepository.save(i);
             if (!editWindow.isCatchingUp(Mod.FEED_MILL)) lockService.lock(Mod.FEED_MILL, i.getName());
+        }
+        try {
+            alertLowStock();
+        } catch (RuntimeException ignored) {
+            // an alert must never stop the nightly rollover
         }
         for (FishFeedStock f : fishFeedStockRepository.findAll()) {
             f.setOpening(f.closing());

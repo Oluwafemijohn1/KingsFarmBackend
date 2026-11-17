@@ -178,6 +178,11 @@ public class WholeEggController {
         return PageResponse.from(service.allTransactions(isAdmin(principal), bank, date, to, pageable).map(service::toResponse));
     }
 
+    @GetMapping("/transactions/{id}")
+    public WeSaleTransactionResponse transaction(@PathVariable Long id) {
+        return service.toResponse(service.findTransaction(id));
+    }
+
     @GetMapping("/customers/outstanding-summary")
     public OutstandingBalanceResponse outstandingSummary() {
         return service.outstandingTotals();

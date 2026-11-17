@@ -203,6 +203,9 @@ public class WholeEggService {
     @org.springframework.beans.factory.annotation.Autowired
     private WeAdjustmentLogRepository adjustmentLog;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
     private void logAdjustment(LocalDate day, WeAdjustmentLog.Kind kind, CatKey category, double qty, String username) {
         if (Math.abs(qty) < 1e-9) {
             return;
@@ -937,11 +940,33 @@ public class WholeEggService {
         if (!txn.getPaymentMethods().contains(PaymentMethod.TRANSFER)) {
             throw new BadRequestException("Only bank-transfer payments can be verified.");
         }
+        var oldStatus = txn.getVerificationStatus();
+        String oldRemark = txn.getVerificationRemark() == null ? "" : txn.getVerificationRemark();
         txn.setVerificationStatus(request.status());
         txn.setVerificationRemark(request.remark());
         txn.setVerifiedBy(adminUsername);
         txn.setVerifiedAt(Instant.now());
-        return transactionRepository.save(txn);
+        WeSaleTransaction saved = transactionRepository.save(txn);
+        // Tell the manager who entered this sale when the administrator confirms / flags it or leaves a remark on it.
+        String newRemark = request.remark() == null ? "" : request.remark().trim();
+        boolean statusChanged = oldStatus != request.status();
+        boolean remarkChanged = !newRemark.isEmpty() && !newRemark.equals(oldRemark.trim());
+        if ((statusChanged || remarkChanged) && saved.getEnteredBy() != null) {
+            String ref = "WE-" + String.format("%03d", saved.getId());
+            String what = request.status() == VerificationStatus.NOT_CONFIRMED ? "was flagged as NOT confirmed"
+                    : request.status() == VerificationStatus.CONFIRMED ? "was confirmed" : "was updated";
+            inApp.notifyUser(saved.getEnteredBy(), "PAYMENT",
+                    remarkChanged ? "Administrator commented on " + ref : "Payment " + ref + " " + (statusChanged ? what : "reviewed"),
+                    saved.getCustomerNameSnapshot() + " - " + ref + " " + what + "." + (newRemark.isEmpty() ? "" : " Remark: " + newRemark),
+                    "/whole-egg/history?txn=" + saved.getId());
+        }
+        return saved;
+    }
+
+    /** One transaction by id - the target of a notification's link. */
+    @Transactional(readOnly = true)
+    public WeSaleTransaction findTransaction(Long id) {
+        return transactionRepository.findById(id).orElseThrow(() -> new NotFoundException("Transaction not found."));
     }
 
     /** Farm-wide, all-time, not year-restricted — a customer's outstanding balance doesn't reset each year just because a manager's browsable history does. */

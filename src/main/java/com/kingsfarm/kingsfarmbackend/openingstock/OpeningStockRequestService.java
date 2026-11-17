@@ -34,6 +34,9 @@ public class OpeningStockRequestService {
         this.lockService = lockService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
     @Audited(module = com.kingsfarm.kingsfarmbackend.common.Mod.ADMIN, action = "Opening Stock Unlock Requested",
             detail = "#request.module() + ' / ' + #request.scopeLabel() + ': ' + #request.reason()")
     @Transactional
@@ -52,6 +55,9 @@ public class OpeningStockRequestService {
         List<String> adminEmails = userRepository.findAllByRoleAndActiveTrue(com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR)
                 .stream().map(User::getUsername).toList();
         notifications.openingStockRequested(adminEmails, requestedBy.getFullName(), saved.getModule().wire(), saved.getScopeLabel(), saved.getReason());
+        inApp.notifyRole(com.kingsfarm.kingsfarmbackend.user.Role.ADMINISTRATOR, "REQUEST", "Edit permission requested",
+                requestedBy.getFullName() + " asked to edit the locked Opening Stock for " + saved.getModule().wire() + " / " + saved.getScopeLabel() + ". Reason: " + saved.getReason(),
+                "/admin/opening-stock");
         return OpeningStockRequestResponse.from(saved);
     }
 
@@ -102,6 +108,12 @@ public class OpeningStockRequestService {
         User requester = request.getRequestedBy();
         notifications.openingStockResolved(requester.getUsername(), requester.getFullName(), request.getModule().wire(),
                 request.getScopeLabel(), decision == RequestStatus.APPROVED, resolvedBy.getFullName(), request.getScope().startsWith("customer-opening-") ? "/whole-egg/customers" : "/" + request.getModule().wire());
+        boolean approved = decision == RequestStatus.APPROVED;
+        inApp.notifyUser(requester.getUsername(), "REQUEST_RESULT",
+                approved ? "Edit permission approved" : "Edit permission denied",
+                "Your request to edit the Opening Stock for " + request.getModule().wire() + " / " + request.getScopeLabel() + " was "
+                        + (approved ? "approved" : "denied") + " by " + resolvedBy.getFullName() + "." + (approved ? " You can make the change now." : ""),
+                request.getScope().startsWith("customer-opening-") ? "/whole-egg/customers" : "/" + request.getModule().wire());
         // requestedBy is still a LAZY proxy at this point (never touched
         // above) — resolve it into the response here, inside the
         // transaction, same reasoning as list() above.
