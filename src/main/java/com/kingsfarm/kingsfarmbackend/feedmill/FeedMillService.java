@@ -174,7 +174,7 @@ public class FeedMillService {
     /** Ingredient stock received on a finished day: added to that day, so the live opening (which later days build on) rises by it. */
     @Audited(module = Mod.FEED_MILL, action = "Record Past-day Restock", type = LogType.AUDIT, detail = "'Ingredient ' + #name + ' +' + #request.qty() + ' on ' + #request.date()")
     @Transactional
-    public void restockPastDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+    public void restockPastDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request, String username) {
         LocalDate day = resolveEntryDay(request.date());
         if (day.isEqual(LocalDate.now())) {
             throw new BadRequestException("For today, use the Added field.");
@@ -185,50 +185,103 @@ public class FeedMillService {
         }
         ingredient.setOpening(ingredient.getOpening() + request.qty());
         ingredientRepository.save(ingredient);
-        logAdded(ingredient.getName(), day, request.qty(), null);
-    }
-
-    /**
-     * Corrects stock that was received on an earlier day but typed into today's Added box (which is why it showed
-     * under today). Moves {@code qty} out of today's Added into the opening - closing is unchanged - and files it
-     * under the day it really arrived, so that day shows it as Added and later days carry it in their opening.
-     */
-    @Audited(module = Mod.FEED_MILL, action = "Move Added Stock To Its Day", type = LogType.AUDIT, detail = "'Ingredient ' + #name + ' ' + #request.qty() + ' belongs to ' + #request.date()")
-    @Transactional
-    public void reassignAddedToDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
-        if (!transactionChangeEnabled) {
-            throw new ForbiddenException("Moving stock to another day is switched off.");
-        }
-        LocalDate day = request.date();
-        if (day == null || !day.isBefore(LocalDate.now())) {
-            throw new BadRequestException("Choose an earlier day. Stock received today belongs in the Added box.");
-        }
-        FeedIngredient ingredient = ingredient(name);
-        if (request.qty() <= 0 || request.qty() > ingredient.getAdded() + 0.0001) {
-            throw new BadRequestException("Only " + ingredient.getAdded() + " is sitting in today's Added box for this ingredient.");
-        }
-        ingredient.setAdded(Math.max(0, ingredient.getAdded() - request.qty()));
-        ingredient.setOpening(ingredient.getOpening() + request.qty());
-        ingredientRepository.save(ingredient);
-        logAdded(ingredient.getName(), day, request.qty(), null);
+        logAdded(ingredient.getName(), day, request.qty(), username);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     private IngredientAddedLogRepository addedLogRepository;
 
     private void logAdded(String name, LocalDate day, double qty, String username) {
-        if (qty == 0) return;
+        if (Math.abs(qty) < 0.0001) return;
         addedLogRepository.save(IngredientAddedLog.builder().ingredientName(name).day(day).qty(qty).enteredBy(username).build());
     }
 
     @Transactional
     public void setIngredientAdded(String name, UpdateQuantityRequest request, String username) {
         FeedIngredient ingredient = ingredient(name);
-        double before = ingredient.getAdded();
         ingredient.setAdded(request.value());
         touch(ingredient, username);
         ingredientRepository.save(ingredient);
-        logAdded(ingredient.getName(), LocalDate.now(), request.value() - before, username);
+        // Today's Added box is one running figure: its receipt is replaced, not stacked.
+        LocalDate today = LocalDate.now();
+        addedLogRepository.deleteAll(addedLogRepository.findAllByIngredientNameIgnoreCaseAndDay(ingredient.getName(), today));
+        logAdded(ingredient.getName(), today, request.value(), username);
+    }
+
+    /** Makes sure everything sitting in today's Added boxes has a receipt line (older entries were typed before receipts existed). */
+    private void syncTodayReceipts() {
+        LocalDate today = LocalDate.now();
+        for (FeedIngredient i : ingredientRepository.findAll()) {
+            double logged = addedLogRepository.findAllByIngredientNameIgnoreCaseAndDay(i.getName(), today).stream().mapToDouble(IngredientAddedLog::getQty).sum();
+            logAdded(i.getName(), today, i.getAdded() - logged, i.getUpdatedBy() != null ? i.getUpdatedBy() : i.getEnteredBy());
+        }
+    }
+
+    /** Ingredient receipts, newest first, optionally for one ingredient and a date range. */
+    @Transactional
+    public List<com.kingsfarm.kingsfarmbackend.feedmill.dto.IngredientReceiptResponse> receipts(String name, LocalDate from, LocalDate to) {
+        syncTodayReceipts();
+        Map<String, String> units = new HashMap<>();
+        ingredientRepository.findAll().forEach(i -> units.put(i.getName().toLowerCase(), i.getUnit()));
+        return addedLogRepository.findAll().stream()
+                .filter(l -> l.getQty() > 0)
+                .filter(l -> name == null || name.isBlank() || l.getIngredientName().equalsIgnoreCase(name))
+                .filter(l -> from == null || !l.getDay().isBefore(from))
+                .filter(l -> to == null || !l.getDay().isAfter(to))
+                .sorted((a, b) -> a.getDay().equals(b.getDay()) ? b.getOccurredAt().compareTo(a.getOccurredAt()) : b.getDay().compareTo(a.getDay()))
+                .map(l -> new com.kingsfarm.kingsfarmbackend.feedmill.dto.IngredientReceiptResponse(
+                        l.getId(), l.getIngredientName(), units.getOrDefault(l.getIngredientName().toLowerCase(), "kg"),
+                        l.getDay(), l.getQty(), l.getEnteredBy(), l.getOccurredAt(), l.getNote()))
+                .toList();
+    }
+
+    /**
+     * Moves part (or all) of one receipt to the day it really arrived. A 75,000 receipt can be split by moving
+     * 15,000 to one day, 30,000 to another and so on - each move takes that much off the original line.
+     * Today's Added box and the opening are adjusted so the closing never changes; days in between follow.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Move Ingredient Receipt To Another Day", type = LogType.AUDIT, detail = "'Receipt ' + #id + ': ' + #request.qty() + ' moved to ' + #request.date()")
+    @Transactional
+    public void moveReceipt(Long id, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request, String username) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Moving stock to another day is switched off.");
+        }
+        LocalDate today = LocalDate.now();
+        IngredientAddedLog src = addedLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Receipt not found."));
+        LocalDate target = request.date();
+        if (target == null || target.isAfter(today)) {
+            throw new BadRequestException("Choose a day that is not in the future.");
+        }
+        if (target.isEqual(src.getDay())) {
+            throw new BadRequestException("This receipt is already on that day.");
+        }
+        double q = request.qty();
+        if (q <= 0 || q > src.getQty() + 0.0001) {
+            throw new BadRequestException("Only " + src.getQty() + " is left on this receipt.");
+        }
+        FeedIngredient ingredient = ingredient(src.getIngredientName());
+        boolean fromToday = src.getDay().isEqual(today);
+        boolean toToday = target.isEqual(today);
+        if (fromToday && !toToday) {
+            ingredient.setAdded(Math.max(0, ingredient.getAdded() - q));
+            ingredient.setOpening(ingredient.getOpening() + q);
+        } else if (!fromToday && toToday) {
+            ingredient.setAdded(ingredient.getAdded() + q);
+            ingredient.setOpening(ingredient.getOpening() - q);
+        }
+        ingredientRepository.save(ingredient);
+        double left = src.getQty() - q;
+        if (left <= 0.0001) {
+            addedLogRepository.delete(src);
+        } else {
+            src.setQty(left);
+            addedLogRepository.save(src);
+        }
+        addedLogRepository.save(IngredientAddedLog.builder()
+                .ingredientName(src.getIngredientName()).day(target).qty(q)
+                .enteredBy(src.getEnteredBy()).occurredAt(src.getOccurredAt())
+                .note("Moved from " + src.getDay() + " by " + username)
+                .build());
     }
 
     /**
