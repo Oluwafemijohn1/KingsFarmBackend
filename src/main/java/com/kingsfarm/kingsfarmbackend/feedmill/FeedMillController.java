@@ -70,6 +70,12 @@ public class FeedMillController {
         return service.receipts(name, from, to);
     }
 
+    @DeleteMapping("/ingredient-receipts/{id}")
+    @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
+    public void deleteIngredientReceipt(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id) {
+        service.deleteReceipt(id, principal.username());
+    }
+
     @PostMapping("/ingredient-receipts/{id}/move")
     @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
     public void moveIngredientReceipt(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id,

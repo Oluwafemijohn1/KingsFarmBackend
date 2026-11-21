@@ -235,6 +235,28 @@ public class FeedMillService {
                 .toList();
     }
 
+    /** Deletes a receipt entered by mistake or twice: that stock is taken back out, so closing (and every later day) drops by it. */
+    @Audited(module = Mod.FEED_MILL, action = "Delete Ingredient Receipt", type = LogType.AUDIT, detail = "'Receipt ' + #id")
+    @Transactional
+    public void deleteReceipt(Long id, String username) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Deleting a receipt is switched off.");
+        }
+        IngredientAddedLog src = addedLogRepository.findById(id).orElseThrow(() -> new NotFoundException("Receipt not found."));
+        FeedIngredient ingredient = ingredient(src.getIngredientName());
+        double q = src.getQty();
+        if (ingredient.closing() - q < 0) {
+            throw new BadRequestException("Deleting this would make " + ingredient.getName() + " stock negative.");
+        }
+        if (src.getDay().isEqual(LocalDate.now())) {
+            ingredient.setAdded(Math.max(0, ingredient.getAdded() - q));
+        } else {
+            ingredient.setOpening(ingredient.getOpening() - q);
+        }
+        ingredientRepository.save(ingredient);
+        addedLogRepository.delete(src);
+    }
+
     /**
      * Moves part (or all) of one receipt to the day it really arrived. A 75,000 receipt can be split by moving
      * 15,000 to one day, 30,000 to another and so on - each move takes that much off the original line.
