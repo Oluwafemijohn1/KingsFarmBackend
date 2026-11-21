@@ -196,6 +196,9 @@ public class FeedMillService {
     @Audited(module = Mod.FEED_MILL, action = "Move Added Stock To Its Day", type = LogType.AUDIT, detail = "'Ingredient ' + #name + ' ' + #request.qty() + ' belongs to ' + #request.date()")
     @Transactional
     public void reassignAddedToDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        if (!transactionChangeEnabled) {
+            throw new ForbiddenException("Moving stock to another day is switched off.");
+        }
         LocalDate day = request.date();
         if (day == null || !day.isBefore(LocalDate.now())) {
             throw new BadRequestException("Choose an earlier day. Stock received today belongs in the Added box.");
