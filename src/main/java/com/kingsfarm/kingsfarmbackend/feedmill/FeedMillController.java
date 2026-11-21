@@ -31,10 +31,8 @@ public class FeedMillController {
     // ── Ingredients ───────────────────────────────────────────────────────
 
     @GetMapping("/ingredients")
-    public List<FeedIngredientResponse> listIngredients() {
-        return service.listIngredients().stream()
-                .map(i -> FeedIngredientResponse.from(i, service.isIngredientOpeningLocked(i.getName())))
-                .toList();
+    public List<FeedIngredientResponse> listIngredients(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.ingredientsOn(date);
     }
 
     @PostMapping("/ingredients")
