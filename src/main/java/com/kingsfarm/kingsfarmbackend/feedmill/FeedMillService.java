@@ -185,14 +185,64 @@ public class FeedMillService {
         }
         ingredient.setOpening(ingredient.getOpening() + request.qty());
         ingredientRepository.save(ingredient);
+        logAdded(ingredient.getName(), day, request.qty(), null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private IngredientAddedLogRepository addedLogRepository;
+
+    private void logAdded(String name, LocalDate day, double qty, String username) {
+        if (qty == 0) return;
+        addedLogRepository.save(IngredientAddedLog.builder().ingredientName(name).day(day).qty(qty).enteredBy(username).build());
     }
 
     @Transactional
     public void setIngredientAdded(String name, UpdateQuantityRequest request, String username) {
         FeedIngredient ingredient = ingredient(name);
+        double before = ingredient.getAdded();
         ingredient.setAdded(request.value());
         touch(ingredient, username);
         ingredientRepository.save(ingredient);
+        logAdded(ingredient.getName(), LocalDate.now(), request.value() - before, username);
+    }
+
+    /**
+     * Ingredient cards for the day being worked on. Today = the live figures. A finished day is worked out from the
+     * records: Added = what was received that day, Used = what that day's production runs consumed, and
+     * Closing = Opening + Added - Used, where Closing is walked back from the live opening (= yesterday's closing).
+     */
+    @Transactional(readOnly = true)
+    public List<FeedIngredientResponse> ingredientsOn(LocalDate date) {
+        LocalDate today = LocalDate.now();
+        if (date == null || !date.isBefore(today)) {
+            return listIngredients().stream().map(i -> FeedIngredientResponse.from(i, isIngredientOpeningLocked(i.getName()))).toList();
+        }
+        Map<String, double[]> after = new HashMap<>();  // [added, used] on days after `date` and before today
+        Map<String, double[]> on = new HashMap<>();     // [added, used] on `date`
+        for (IngredientAddedLog l : addedLogRepository.findAll()) {
+            if (l.getDay().isAfter(date) && l.getDay().isBefore(today)) after.computeIfAbsent(l.getIngredientName().toLowerCase(), k -> new double[2])[0] += l.getQty();
+            else if (l.getDay().isEqual(date)) on.computeIfAbsent(l.getIngredientName().toLowerCase(), k -> new double[2])[0] += l.getQty();
+        }
+        for (FeedProductionLogEntry run : productionRepository.findAll()) {
+            LocalDate runDay = run.getOccurredAt().atZone(ZONE).toLocalDate();
+            if (runDay.isAfter(date) && runDay.isBefore(today)) {
+                for (FeedFormulationEntry e : formulationRepository.findAllByFeedType(run.getFeedType()))
+                    after.computeIfAbsent(e.getIngredient().getName().toLowerCase(), k -> new double[2])[1] += round1(e.getQtyPerTon() * run.getQtyTons());
+            } else if (runDay.isEqual(date)) {
+                for (FeedFormulationEntry e : formulationRepository.findAllByFeedType(run.getFeedType()))
+                    on.computeIfAbsent(e.getIngredient().getName().toLowerCase(), k -> new double[2])[1] += round1(e.getQtyPerTon() * run.getQtyTons());
+            }
+        }
+        List<FeedIngredientResponse> out = new java.util.ArrayList<>();
+        for (FeedIngredient i : listIngredients()) {
+            double[] a = after.getOrDefault(i.getName().toLowerCase(), new double[2]);
+            double[] d = on.getOrDefault(i.getName().toLowerCase(), new double[2]);
+            double closing = i.getOpening() - (a[0] - a[1]);
+            double opening = closing - d[0] + d[1];
+            out.add(new FeedIngredientResponse(i.getId(), i.getName(), i.getUnit(), opening, true, d[0], d[1],
+                    i.getMin(), closing, closing < i.getMin(), i.getEnteredBy(), i.getUpdatedBy()));
+        }
+        return out;
     }
 
     @Transactional
@@ -742,7 +792,14 @@ public class FeedMillService {
     /** Daily rollover — every ingredient's and fish feed's closing becomes the new (locked) opening; added/used/collected restart at zero. */
     @Transactional
     public void rollOver() {
+        LocalDate finished = LocalDate.now().minusDays(1);
+        Map<String, Double> logged = new HashMap<>();
+        for (IngredientAddedLog l : addedLogRepository.findAll()) {
+            if (l.getDay().isEqual(finished)) logged.merge(l.getIngredientName().toLowerCase(), l.getQty(), Double::sum);
+        }
         for (FeedIngredient i : ingredientRepository.findAll()) {
+            // Whatever was added but never logged (entered before the log existed) is filed under the finished day.
+            logAdded(i.getName(), finished, i.getAdded() - logged.getOrDefault(i.getName().toLowerCase(), 0.0), null);
             i.setOpening(i.closing());
             i.setAdded(0);
             i.setUsed(0);
