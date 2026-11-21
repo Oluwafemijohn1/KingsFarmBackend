@@ -43,6 +43,10 @@ public class IngredientAddedLog {
     @Column(name = "entered_by", length = 64)
     private String enteredBy;
 
+    /** e.g. "Moved from 2026-11-21 by jamiu" when a receipt was put on the day it really arrived. */
+    @Column(length = 200)
+    private String note;
+
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 

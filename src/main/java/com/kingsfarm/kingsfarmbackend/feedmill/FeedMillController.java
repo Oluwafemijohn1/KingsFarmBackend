@@ -58,14 +58,23 @@ public class FeedMillController {
 
     @PostMapping("/ingredients/{name}/restock")
     @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
-    public void restockPastDay(@PathVariable String name, @Valid @RequestBody com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
-        service.restockPastDay(name, request);
+    public void restockPastDay(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable String name, @Valid @RequestBody com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        service.restockPastDay(name, request, principal.username());
     }
 
-    @PostMapping("/ingredients/{name}/reassign-added")
+    @GetMapping("/ingredient-receipts")
+    public List<com.kingsfarm.kingsfarmbackend.feedmill.dto.IngredientReceiptResponse> ingredientReceipts(
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.receipts(name, from, to);
+    }
+
+    @PostMapping("/ingredient-receipts/{id}/move")
     @PreAuthorize("hasRole('FEED_MILL_MANAGER')")
-    public void reassignAddedToDay(@PathVariable String name, @Valid @RequestBody com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
-        service.reassignAddedToDay(name, request);
+    public void moveIngredientReceipt(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id,
+                                      @Valid @RequestBody com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        service.moveReceipt(id, request, principal.username());
     }
 
     @PatchMapping("/ingredients/{name}/added")
