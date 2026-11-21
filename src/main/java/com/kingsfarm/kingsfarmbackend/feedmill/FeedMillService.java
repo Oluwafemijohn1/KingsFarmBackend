@@ -188,6 +188,28 @@ public class FeedMillService {
         logAdded(ingredient.getName(), day, request.qty(), null);
     }
 
+    /**
+     * Corrects stock that was received on an earlier day but typed into today's Added box (which is why it showed
+     * under today). Moves {@code qty} out of today's Added into the opening - closing is unchanged - and files it
+     * under the day it really arrived, so that day shows it as Added and later days carry it in their opening.
+     */
+    @Audited(module = Mod.FEED_MILL, action = "Move Added Stock To Its Day", type = LogType.AUDIT, detail = "'Ingredient ' + #name + ' ' + #request.qty() + ' belongs to ' + #request.date()")
+    @Transactional
+    public void reassignAddedToDay(String name, com.kingsfarm.kingsfarmbackend.feedmill.dto.RestockRequest request) {
+        LocalDate day = request.date();
+        if (day == null || !day.isBefore(LocalDate.now())) {
+            throw new BadRequestException("Choose an earlier day. Stock received today belongs in the Added box.");
+        }
+        FeedIngredient ingredient = ingredient(name);
+        if (request.qty() <= 0 || request.qty() > ingredient.getAdded() + 0.0001) {
+            throw new BadRequestException("Only " + ingredient.getAdded() + " is sitting in today's Added box for this ingredient.");
+        }
+        ingredient.setAdded(Math.max(0, ingredient.getAdded() - request.qty()));
+        ingredient.setOpening(ingredient.getOpening() + request.qty());
+        ingredientRepository.save(ingredient);
+        logAdded(ingredient.getName(), day, request.qty(), null);
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     private IngredientAddedLogRepository addedLogRepository;
 
