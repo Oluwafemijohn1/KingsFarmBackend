@@ -66,6 +66,16 @@ public class FeedProductionLogEntry {
     @Column(name = "updated_by", length = 64)
     private String updatedBy;
 
+    /** The Administrator's comment on this run (shown to the manager who entered it). */
+    @Column(name = "admin_remark", length = 500)
+    private String adminRemark;
+
+    @Column(name = "remark_by", length = 64)
+    private String remarkBy;
+
+    @Column(name = "remark_at")
+    private Instant remarkAt;
+
     @PrePersist
     void onCreate() {
         if (occurredAt == null) {

@@ -102,6 +102,16 @@ public class CrackEggController {
                 .map(t -> GcSaleResponse.from(t, service.isEditable(t.getOccurredAt()))));
     }
 
+    public record RemarkBody(@jakarta.validation.constraints.Size(max = 500) String remark) {}
+
+    @PatchMapping("/sales/{id}/remark")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public GcSaleResponse remarkSale(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id,
+                                     @jakarta.validation.Valid @RequestBody RemarkBody body) {
+        GcSaleTransaction t = service.setSaleRemark(id, body.remark(), principal.username());
+        return GcSaleResponse.from(t, service.isEditable(t.getOccurredAt()));
+    }
+
     @GetMapping("/sales/summary")
     public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                                                                                          @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {

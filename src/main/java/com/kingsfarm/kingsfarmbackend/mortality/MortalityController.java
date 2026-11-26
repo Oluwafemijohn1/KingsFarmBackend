@@ -103,6 +103,16 @@ public class MortalityController {
                 .map(e -> MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 
+    public record RemarkBody(@jakarta.validation.constraints.Size(max = 500) String remark) {}
+
+    @PatchMapping("/sales/{id}/remark")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public MortSaleResponse remarkSale(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id,
+                                       @jakarta.validation.Valid @RequestBody RemarkBody body) {
+        MortSaleEntry e = service.setSaleRemark(id, body.remark(), principal.username());
+        return MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()));
+    }
+
     @GetMapping("/sales/summary")
     public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(@RequestParam(required = false) String bank,
                                                                                          @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,

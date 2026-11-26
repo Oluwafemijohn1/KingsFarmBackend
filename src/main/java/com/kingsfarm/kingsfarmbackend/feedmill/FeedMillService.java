@@ -235,6 +235,26 @@ public class FeedMillService {
                 .toList();
     }
 
+    /** The Administrator's remark on a production run; the manager who entered the run is told about it. A blank remark clears it. */
+    @Audited(module = Mod.FEED_MILL, action = "Remark On Production Run", type = LogType.AUDIT, detail = "'Run ' + #id")
+    @Transactional
+    public FeedProductionLogEntry setProductionRemark(Long id, String remark, String adminUsername) {
+        FeedProductionLogEntry entry = productionRepository.findById(id).orElseThrow(() -> new NotFoundException("Production run not found."));
+        String text = remark == null ? "" : remark.trim();
+        boolean changed = !text.equals(entry.getAdminRemark() == null ? "" : entry.getAdminRemark());
+        entry.setAdminRemark(text.isEmpty() ? null : text);
+        entry.setRemarkBy(text.isEmpty() ? null : adminUsername);
+        entry.setRemarkAt(text.isEmpty() ? null : java.time.Instant.now());
+        FeedProductionLogEntry saved = productionRepository.save(entry);
+        if (changed && !text.isEmpty() && saved.getEnteredBy() != null) {
+            inApp.notifyUser(saved.getEnteredBy(), "PRODUCTION",
+                    "Administrator commented on a production run",
+                    saved.getFeedType().getName() + " (" + saved.getQtyTons() + " t) - Remark: " + text,
+                    "/feed-mill/history");
+        }
+        return saved;
+    }
+
     /** Deletes a receipt entered by mistake or twice: that stock is taken back out, so closing (and every later day) drops by it. */
     @Audited(module = Mod.FEED_MILL, action = "Delete Ingredient Receipt", type = LogType.AUDIT, detail = "'Receipt ' + #id")
     @Transactional
