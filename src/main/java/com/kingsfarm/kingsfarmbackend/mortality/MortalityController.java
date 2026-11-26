@@ -103,6 +103,13 @@ public class MortalityController {
                 .map(e -> MortSaleResponse.from(e, service.isEditableInstant(e.getOccurredAt()))));
     }
 
+    @GetMapping("/sales/summary")
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(@RequestParam(required = false) String bank,
+                                                                                         @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+                                                                                         @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate to) {
+        return service.salesSummary(bank, date, to);
+    }
+
     @PatchMapping("/sales/{id}/date")
     @PreAuthorize("hasRole('ADMINISTRATOR')")
     public MortSaleResponse moveSaleDate(@PathVariable Long id, @Valid @RequestBody MoveSaleDateRequest request) {

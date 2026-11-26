@@ -178,6 +178,15 @@ public class WholeEggController {
         return PageResponse.from(service.allTransactions(isAdmin(principal), bank, date, to, pageable).map(service::toResponse));
     }
 
+    /** What was sold vs the cash / transfer that actually came in, for exactly the same filters as the list above. */
+    @GetMapping("/transactions/summary")
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(@AuthenticationPrincipal AuthenticatedPrincipal principal,
+                                                                                         @RequestParam(required = false) String bank,
+                                                                                         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+                                                                                         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.salesSummary(isAdmin(principal), bank, date, to);
+    }
+
     @GetMapping("/transactions/{id}")
     public WeSaleTransactionResponse transaction(@PathVariable Long id) {
         return service.toResponse(service.findTransaction(id));
@@ -195,10 +204,19 @@ public class WholeEggController {
     @PreAuthorize("hasRole('ADMINISTRATOR')")
     public PageResponse<WeSaleTransactionResponse> transferTransactions(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                                                           @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                                                          @RequestParam(required = false) String bank,
                                                                           @PageableDefault(size = 20) Pageable pageable) {
         Instant rangeStart = ReportPeriods.startOfDay(start);
         Instant rangeEnd = ReportPeriods.startOfNextDay(end);
-        return PageResponse.from(service.transferTransactions(rangeStart, rangeEnd, pageable).map(service::toResponse));
+        return PageResponse.from(service.transferTransactions(rangeStart, rangeEnd, bank, pageable).map(service::toResponse));
+    }
+
+    @GetMapping("/transactions/transfers/summary")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse transferSummary(@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+                                                                                            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+                                                                                            @RequestParam(required = false) String bank) {
+        return service.transferSummary(ReportPeriods.startOfDay(start), ReportPeriods.startOfNextDay(end), bank);
     }
 
     @GetMapping("/transactions/delete-enabled")

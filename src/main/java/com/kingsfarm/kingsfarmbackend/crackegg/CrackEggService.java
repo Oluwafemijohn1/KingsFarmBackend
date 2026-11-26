@@ -393,6 +393,22 @@ public class CrackEggService {
         return saleRepository.findAllByOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtDesc(start, end, pageable);
     }
 
+    /** Sold vs cash / transfer received across everything the date filter selects (not just one page). */
+    @Transactional(readOnly = true)
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(LocalDate from, LocalDate to) {
+        double sold = 0;
+        long cash = 0;
+        long transfer = 0;
+        long count = 0;
+        for (GcSaleTransaction t : saleHistory(from, to, org.springframework.data.domain.Pageable.unpaged()).getContent()) {
+            count++;
+            sold += t.getQty() * t.getPrice();
+            cash += t.getCashAmount();
+            transfer += t.getTransferAmount();
+        }
+        return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
+    }
+
     // ── Gift log ──────────────────────────────────────────────────────────
 
     /** Snapshots the CURRENT gcGiftQty/recipient/authorizer into a permanent log row — matches the frontend's saveGift(), which reads live state rather than taking new values as input. */

@@ -82,6 +82,15 @@ public interface WeSaleTransactionRepository extends JpaRepository<WeSaleTransac
      * findAllByFeedTypeNameLowerIn in the Feed Mill module for the same
      * convention).
      */
+    @Query(value = "SELECT t FROM WeSaleTransaction t WHERE t.occurredAt >= :start AND t.occurredAt < :end " +
+            "AND EXISTS (SELECT 1 FROM t.transfers tr WHERE tr.bank = :bank) ORDER BY t.occurredAt DESC",
+            countQuery = "SELECT count(t) FROM WeSaleTransaction t WHERE t.occurredAt >= :start AND t.occurredAt < :end " +
+            "AND EXISTS (SELECT 1 FROM t.transfers tr WHERE tr.bank = :bank)")
+    Page<WeSaleTransaction> findTransfersToBank(@Param("start") Instant start,
+                                                @Param("end") Instant end,
+                                                @Param("bank") String bank,
+                                                Pageable pageable);
+
     @Query("SELECT t FROM WeSaleTransaction t WHERE :method MEMBER OF t.paymentMethods " +
             "AND t.occurredAt >= :start AND t.occurredAt < :end ORDER BY t.occurredAt DESC")
     Page<WeSaleTransaction> findAllByPaymentMethodAndOccurredAtRange(@Param("method") PaymentMethod method,
