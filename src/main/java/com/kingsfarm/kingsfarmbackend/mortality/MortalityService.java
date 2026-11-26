@@ -576,6 +576,27 @@ public class MortalityService {
         return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
+    /** The Administrator's remark on a sale; the manager who entered it is told. A blank remark clears it. */
+    @Audited(module = Mod.MORTALITY, action = "Remark On Sale", type = LogType.AUDIT, detail = "'Sale ' + #id")
+    @Transactional
+    public MortSaleEntry setSaleRemark(Long id, String remark, String adminUsername) {
+        MortSaleEntry e = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Sale not found."));
+        String text = remark == null ? "" : remark.trim();
+        boolean changed = !text.equals(e.getAdminRemark() == null ? "" : e.getAdminRemark());
+        e.setAdminRemark(text.isEmpty() ? null : text);
+        e.setRemarkBy(text.isEmpty() ? null : adminUsername);
+        e.setRemarkAt(text.isEmpty() ? null : Instant.now());
+        MortSaleEntry saved = saleRepository.save(e);
+        if (changed && !text.isEmpty() && saved.getEnteredBy() != null) {
+            inApp.notifyUser(saved.getEnteredBy(), "SALE", "Administrator commented on a sale",
+                    saved.getCustomer() + " - Remark: " + text, "/mortality/transactions");
+        }
+        return saved;
+    }
+
     @Transactional(readOnly = true)
     public Page<MortSaleEntry> saleHistory(Pageable pageable) {
         return saleRepository.findAllByOrderByOccurredAtDesc(pageable);

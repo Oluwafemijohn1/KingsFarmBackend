@@ -409,6 +409,27 @@ public class CrackEggService {
         return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.kingsfarm.kingsfarmbackend.notification.AppNotificationService inApp;
+
+    /** The Administrator's remark on a sale; the manager who entered it is told. A blank remark clears it. */
+    @Audited(module = Mod.CRACK_EGG, action = "Remark On Sale", type = LogType.AUDIT, detail = "'Sale CE-' + #id")
+    @Transactional
+    public GcSaleTransaction setSaleRemark(Long id, String remark, String adminUsername) {
+        GcSaleTransaction t = saleRepository.findById(id).orElseThrow(() -> new NotFoundException("Sale not found."));
+        String text = remark == null ? "" : remark.trim();
+        boolean changed = !text.equals(t.getAdminRemark() == null ? "" : t.getAdminRemark());
+        t.setAdminRemark(text.isEmpty() ? null : text);
+        t.setRemarkBy(text.isEmpty() ? null : adminUsername);
+        t.setRemarkAt(text.isEmpty() ? null : Instant.now());
+        GcSaleTransaction saved = saleRepository.save(t);
+        if (changed && !text.isEmpty() && saved.getEnteredBy() != null) {
+            inApp.notifyUser(saved.getEnteredBy(), "SALE", "Administrator commented on CE-" + String.format("%03d", saved.getId()),
+                    saved.getCustomer() + " - Remark: " + text, "/crack-egg/history");
+        }
+        return saved;
+    }
+
     // ── Gift log ──────────────────────────────────────────────────────────
 
     /** Snapshots the CURRENT gcGiftQty/recipient/authorizer into a permanent log row — matches the frontend's saveGift(), which reads live state rather than taking new values as input. */

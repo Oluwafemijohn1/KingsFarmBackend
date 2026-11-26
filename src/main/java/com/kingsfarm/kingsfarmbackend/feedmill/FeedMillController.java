@@ -62,6 +62,16 @@ public class FeedMillController {
         service.restockPastDay(name, request, principal.username());
     }
 
+    public record RemarkBody(@jakarta.validation.constraints.Size(max = 500) String remark) {}
+
+    @PatchMapping("/production/{id}/remark")
+    @PreAuthorize("hasRole('ADMINISTRATOR')")
+    public ProductionLogResponse remarkProduction(@AuthenticationPrincipal AuthenticatedPrincipal principal, @PathVariable Long id,
+                                                  @Valid @RequestBody RemarkBody body) {
+        FeedProductionLogEntry entry = service.setProductionRemark(id, body.remark(), principal.username());
+        return ProductionLogResponse.from(entry, service.isEditable(entry.getOccurredAt()));
+    }
+
     @GetMapping("/ingredient-receipts")
     public List<com.kingsfarm.kingsfarmbackend.feedmill.dto.IngredientReceiptResponse> ingredientReceipts(
             @RequestParam(required = false) String name,

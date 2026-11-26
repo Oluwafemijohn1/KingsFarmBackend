@@ -108,4 +108,14 @@ public class MortSaleEntry {
             occurredAt = Instant.now();
         }
     }
+
+    /** The Administrator's comment on this sale (shown to the manager who entered it). */
+    @jakarta.persistence.Column(name = "admin_remark", length = 500)
+    private String adminRemark;
+
+    @jakarta.persistence.Column(name = "remark_by", length = 64)
+    private String remarkBy;
+
+    @jakarta.persistence.Column(name = "remark_at")
+    private java.time.Instant remarkAt;
 }

@@ -14,12 +14,16 @@ public record ProductionLogResponse(
         Instant occurredAt,
         String enteredBy,
         String updatedBy,
-        boolean editable
+        boolean editable,
+        String adminRemark,
+        String remarkBy,
+        Instant remarkAt
 ) {
     public static ProductionLogResponse from(FeedProductionLogEntry e, boolean editable) {
         return new ProductionLogResponse(
                 e.getId(), e.getFeedType().getId(), e.getFeedType().getName(), e.getQtyTons(), e.getQtyTons() * 1000,
-                e.getFormulationRef(), e.getOccurredAt(), e.getEnteredBy(), e.getUpdatedBy(), editable
+                e.getFormulationRef(), e.getOccurredAt(), e.getEnteredBy(), e.getUpdatedBy(), editable,
+                e.getAdminRemark(), e.getRemarkBy(), e.getRemarkAt()
         );
     }
 }

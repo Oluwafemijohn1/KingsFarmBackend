@@ -23,13 +23,17 @@ public record GcSaleResponse(
         Instant occurredAt,
         String enteredBy,
         String updatedBy,
-        boolean editable
+        boolean editable,
+        String adminRemark,
+        String remarkBy,
+        Instant remarkAt
 ) {
     public static GcSaleResponse from(GcSaleTransaction t, boolean editable) {
         return new GcSaleResponse(
                 t.getId(), t.getCustomer(), t.getState(), t.getQty(), t.getPrice(), t.getQty() * t.getPrice(),
                 t.getPaymentMethods(), t.getBank(), t.getCashAmount(), t.getTransferAmount(), t.getAmountPaid(),
-                t.getCredit(), t.getAdvance(), t.getOccurredAt(), t.getEnteredBy(), t.getUpdatedBy(), editable
+                t.getCredit(), t.getAdvance(), t.getOccurredAt(), t.getEnteredBy(), t.getUpdatedBy(), editable,
+                t.getAdminRemark(), t.getRemarkBy(), t.getRemarkAt()
         );
     }
 }

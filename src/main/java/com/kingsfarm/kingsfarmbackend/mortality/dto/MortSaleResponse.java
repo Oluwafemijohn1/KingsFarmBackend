@@ -25,14 +25,18 @@ public record MortSaleResponse(
         Instant occurredAt,
         String enteredBy,
         String updatedBy,
-        boolean editable
+        boolean editable,
+        String adminRemark,
+        String remarkBy,
+        Instant remarkAt
 ) {
     public static MortSaleResponse from(MortSaleEntry e, boolean editable) {
         return new MortSaleResponse(
                 e.getId(), e.getCategory(), e.getCustomer(), e.getState(), e.getQty(), e.getPrice(),
                 (long) e.getQty() * e.getPrice(), e.getPaymentMethods(), e.getBank(), e.getCashAmount(),
                 e.getTransferAmount(), e.getAmountPaid(), e.getCredit(), e.getAdvance(), e.getOccurredAt(),
-                e.getEnteredBy(), e.getUpdatedBy(), editable
+                e.getEnteredBy(), e.getUpdatedBy(), editable,
+                e.getAdminRemark(), e.getRemarkBy(), e.getRemarkAt()
         );
     }
 }
