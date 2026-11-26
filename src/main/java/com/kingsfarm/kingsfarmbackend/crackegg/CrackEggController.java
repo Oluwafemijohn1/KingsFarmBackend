@@ -102,6 +102,12 @@ public class CrackEggController {
                 .map(t -> GcSaleResponse.from(t, service.isEditable(t.getOccurredAt()))));
     }
 
+    @GetMapping("/sales/summary")
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                                                                                         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.salesSummary(from, to);
+    }
+
     // ── Gift log ──────────────────────────────────────────────────────────
 
     @PatchMapping("/gift/qty")

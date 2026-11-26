@@ -921,8 +921,51 @@ public class WholeEggService {
      * report endpoints.
      */
     @Transactional(readOnly = true)
-    public Page<WeSaleTransaction> transferTransactions(Instant start, Instant end, Pageable pageable) {
-        return transactionRepository.findAllByPaymentMethodAndOccurredAtRange(PaymentMethod.TRANSFER, start, end, pageable);
+    public Page<WeSaleTransaction> transferTransactions(Instant start, Instant end, String bank, Pageable pageable) {
+        String b = bank == null ? "" : bank.trim();
+        if (b.isEmpty()) {
+            return transactionRepository.findAllByPaymentMethodAndOccurredAtRange(PaymentMethod.TRANSFER, start, end, pageable);
+        }
+        return transactionRepository.findTransfersToBank(start, end, b, pageable);
+    }
+
+    /** Cash / transfer totals for everything Payment Auditing lists across the whole chosen range (not just the visible page). */
+    @Transactional(readOnly = true)
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse transferSummary(Instant start, Instant end, String bank) {
+        double sold = 0;
+        long cash = 0;
+        long transfer = 0;
+        long count = 0;
+        for (WeSaleTransaction t : transferTransactions(start, end, bank, Pageable.unpaged()).getContent()) {
+            count++;
+            if (t.getType() == WeSaleTxnType.SALE) {
+                sold += toResponse(t).revenue();
+            }
+            cash += t.getCashAmount();
+            transfer += t.getTransferAmount();
+        }
+        return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
+    }
+
+    /**
+     * Totals for exactly what the Sales Transactions filters select (not just one page): what was sold, and the money that actually came in
+     * as cash and as transfer. They differ whenever a customer pays more than they bought (clearing a debt) or less (taking credit).
+     */
+    @Transactional(readOnly = true)
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(boolean isAdmin, String bank, LocalDate date, LocalDate to) {
+        double sold = 0;
+        long cash = 0;
+        long transfer = 0;
+        long count = 0;
+        for (WeSaleTransaction t : allTransactions(isAdmin, bank, date, to, Pageable.unpaged()).getContent()) {
+            count++;
+            if (t.getType() == WeSaleTxnType.SALE) {
+                sold += toResponse(t).revenue();
+            }
+            cash += t.getCashAmount();
+            transfer += t.getTransferAmount();
+        }
+        return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
     }
 
     /**
@@ -944,12 +987,14 @@ public class WholeEggService {
         String oldRemark = txn.getVerificationRemark() == null ? "" : txn.getVerificationRemark();
         txn.setVerificationStatus(request.status());
         txn.setVerificationRemark(request.remark());
-        txn.setVerifiedBy(adminUsername);
-        txn.setVerifiedAt(Instant.now());
+        // Clicking the same tick/cross again sends UNREVIEWED: the mistake is undone and nobody is shown as having reviewed it.
+        boolean undone = request.status() == VerificationStatus.UNREVIEWED;
+        txn.setVerifiedBy(undone ? null : adminUsername);
+        txn.setVerifiedAt(undone ? null : Instant.now());
         WeSaleTransaction saved = transactionRepository.save(txn);
         // Tell the manager who entered this sale when the administrator confirms / flags it or leaves a remark on it.
         String newRemark = request.remark() == null ? "" : request.remark().trim();
-        boolean statusChanged = oldStatus != request.status();
+        boolean statusChanged = oldStatus != request.status() && !undone;
         boolean remarkChanged = !newRemark.isEmpty() && !newRemark.equals(oldRemark.trim());
         if ((statusChanged || remarkChanged) && saved.getEnteredBy() != null) {
             String ref = "WE-" + String.format("%03d", saved.getId());

@@ -560,6 +560,22 @@ public class MortalityService {
         return saleRepository.findFiltered(p, start, end, pageable);
     }
 
+    /** Sold vs cash / transfer received across everything the Sales History filters select (not just one page). */
+    @Transactional(readOnly = true)
+    public com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse salesSummary(String payment, LocalDate date, LocalDate to) {
+        double sold = 0;
+        long cash = 0;
+        long transfer = 0;
+        long count = 0;
+        for (MortSaleEntry e : saleHistory(payment, date, to, Pageable.unpaged()).getContent()) {
+            count++;
+            sold += (long) e.getQty() * e.getPrice();
+            cash += e.getCashAmount();
+            transfer += e.getTransferAmount();
+        }
+        return new com.kingsfarm.kingsfarmbackend.wholeegg.dto.SalesSummaryResponse(sold, cash, transfer, count);
+    }
+
     @Transactional(readOnly = true)
     public Page<MortSaleEntry> saleHistory(Pageable pageable) {
         return saleRepository.findAllByOrderByOccurredAtDesc(pageable);
